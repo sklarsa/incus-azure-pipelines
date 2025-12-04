@@ -1,0 +1,77 @@
+# azure-agent.yaml
+image:
+  distribution: ubuntu
+  release: noble
+
+source:
+  downloader: debootstrap
+  url: http://archive.ubuntu.com/ubuntu
+  variant: default
+
+targets:
+  incus:
+    vm:
+      filesystem: ext4
+
+packages:
+  manager: apt
+  update: true
+  sets:
+    - packages:
+        - curl
+        - wget
+        - tar
+        - sudo
+        - git
+        - docker-ce
+        - containerd.io
+        - docker-buildx-plugin
+        - docker-compose-plugin
+      action: install
+  repositories:
+    - name: docker
+      url: https://download.docker.com/linux/ubuntu/24.04/stable
+      key: https://download.docker.com/linux/ubuntu/gpg
+
+files:
+  - path: /etc/systemd/system/azure-agent.service
+    mode: "0644"
+    generator: dump
+    content: |-
+      [Unit]
+      Description=Azure DevOps Agent
+      After=network-online.target
+
+      [Service]
+      Type=simple
+      User=agent
+      WorkingDirectory=/home/agent
+      ExecStartPre=/home/agent/configure.sh
+      ExecStart=/home/agent/run.sh
+      ExecStopPost=/usr/bin/sudo /usr/bin/systemctl poweroff
+
+      [Install]
+      WantedBy=multi-user.target
+
+actions:
+  - trigger: post-packages
+    action: |-
+      #!/bin/bash
+      set -euo pipefail
+      
+      AGENT_USER="agent"
+      AGENT_URL="{{ .agent_url }}"
+      
+      groupadd --gid 1100 "${AGENT_USER}"
+      useradd -m -s /bin/bash --uid 1100 --gid 1100 "${AGENT_USER}"
+      echo "${AGENT_USER} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${AGENT_USER}
+      chmod 440 /etc/sudoers.d/${AGENT_USER}
+      
+      su - "${AGENT_USER}" -c "
+        curl -fsSL -o agent.tar.gz ${AGENT_URL}
+        tar -xzf agent.tar.gz
+        rm agent.tar.gz
+      "
+
+      systemctl enable azure-agent.service
+

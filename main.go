@@ -39,7 +39,6 @@ func main() {
 	go func() {
 		<-sigCh
 		cancel()
-		close(agentsToCreate)
 	}()
 
 	provision := flag.Bool("provision", false, "provision the base instance and exit")
@@ -102,7 +101,9 @@ func main() {
 		return
 	}
 
-	go func() {
+	wg := &sync.WaitGroup{}
+
+	wg.Go(func() {
 		for {
 			idx, open := <-agentsToCreate
 			if !open {
@@ -115,49 +116,26 @@ func main() {
 				slog.Error("failed to create agent", "idx", idx, "err", err)
 			}
 		}
-	}()
+	})
 
-	go func() {
+	wg.Go(func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
+				close(agentsToCreate)
 				return
-			default:
+			case <-ticker.C:
 				if err = reconcileAgents(c, conf, agentsToCreate); err != nil {
-					log.Fatal(err)
+					slog.Error("reconcile failed", "err", err)
 				}
-				time.Sleep(5 * time.Second)
 			}
 		}
-	}()
-
-	listener, err := c.GetEvents()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer listener.Disconnect()
-
-	t, err := listener.AddHandler(nil, func(e api.Event) {
-		/*
-					fmt.Fprintf(os.Stdout, `New Event
-			timestamp = %s
-			type = %s
-			data = %s
-
-			`,
-						e.Timestamp,
-						e.Type,
-						e.Metadata,
-					)
-		*/
 	})
 
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer listener.RemoveHandler(t)
-
-	listener.Wait()
+	wg.Wait()
 
 }
 

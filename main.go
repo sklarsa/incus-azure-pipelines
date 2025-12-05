@@ -26,6 +26,7 @@ import (
 const (
 	defaultAgentPrefix  = "azp-agent"
 	defaultBaseInstance = "azp-agent-base"
+	agentUser           = "agent"
 )
 
 var (
@@ -414,7 +415,7 @@ func provisionBaseInstance(ctx context.Context, c incus.InstanceServer, conf Con
 	script := `
 set -euo pipefail
 AGENT_URL="` + agentURL + `"
-AGENT_USER="agent"
+AGENT_USER="` + agentUser + `"
 AGENT_HOME="/home/${AGENT_USER}"
 
 apt-get update

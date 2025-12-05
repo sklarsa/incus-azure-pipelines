@@ -19,7 +19,7 @@ import (
 var runAgentScript string
 
 func provisionBaseInstance(ctx context.Context, c incus.InstanceServer, conf Config) error {
-	i, etag, err := c.GetInstance(defaultBaseInstance)
+	i, _, err := c.GetInstance(defaultBaseInstance)
 
 	// Return on non-404 errors
 	if err != nil && !api.StatusErrorCheck(err, http.StatusNotFound) {
@@ -119,6 +119,11 @@ su - "${AGENT_USER}" -c "
 	}
 
 	if err := op.WaitContext(ctx); err != nil {
+		return err
+	}
+
+	i, etag, err := c.GetInstance(defaultBaseInstance)
+	if err != nil {
 		return err
 	}
 

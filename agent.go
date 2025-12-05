@@ -97,9 +97,6 @@ func reconcileAgents(c incus.InstanceServer, conf Config, agentsToCreate chan<- 
 		instancesFound    uint64 = 0
 	)
 
-	mu.Lock()
-	defer mu.Unlock()
-
 	instances, err := c.GetInstances(api.InstanceTypeContainer)
 	if err != nil {
 		return fmt.Errorf("unable to list instances in project %q: %w",

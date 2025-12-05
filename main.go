@@ -24,7 +24,6 @@ const (
 )
 
 var (
-	mu             = &sync.Mutex{}
 	agentRe        = regexp.MustCompile("^" + defaultAgentPrefix + `-(\d{1,2})$`)
 	agentsToCreate = make(chan int)
 )

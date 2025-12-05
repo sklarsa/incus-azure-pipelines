@@ -19,6 +19,8 @@ import (
 var runAgentScript string
 
 func provisionBaseInstance(ctx context.Context, c incus.InstanceServer, conf Config) error {
+	// todo: check that provisions scripts exist before doing anything
+
 	i, _, err := c.GetInstance(defaultBaseInstance)
 
 	// Return on non-404 errors
@@ -40,6 +42,8 @@ func provisionBaseInstance(ctx context.Context, c incus.InstanceServer, conf Con
 			return err
 		}
 	}
+
+	// todo: pull the base image if it does not exist
 
 	req := api.InstancesPost{
 		Name: defaultBaseInstance,

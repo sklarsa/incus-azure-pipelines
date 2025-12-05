@@ -67,6 +67,7 @@ func createAgent(ctx context.Context, c incus.InstanceServer, conf Config, idx i
 		api.InstanceExecPost{
 			Command: []string{
 				"setsid",
+				"--fork",
 				"/home/agent/run_agent.sh",
 				"--agent",
 				fmt.Sprintf("%s-%d", hostname, idx),

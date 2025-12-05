@@ -40,6 +40,8 @@ func main() {
 		cancel()
 	}()
 
+	// todo: add a run flag and display help if no flag passed
+
 	provision := flag.Bool("provision", false, "provision the base instance and exit")
 	logs := flag.Int("logs", -1, "get agent logs by index (0-base)")
 	configPath := flag.String("config", "./config.yaml", "path of config file")
@@ -62,7 +64,7 @@ func main() {
 	}
 	defer c.Disconnect()
 
-	// todo: we need to make sure the project has a profile, since default profile may not work
+	// todo: we need to make sure the project has a profile, since new projects created with empty profile that doesn't work
 	if err = ensureProject(c, conf.ProjectName); err != nil {
 		log.Fatal(err)
 	}

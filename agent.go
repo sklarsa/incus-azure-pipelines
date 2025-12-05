@@ -27,6 +27,14 @@ func createAgent(ctx context.Context, c incus.InstanceServer, conf Config, idx i
 				"boot.host_shutdown_action": "force-stop",
 			},
 			Ephemeral: true,
+			Devices: map[string]map[string]string{
+				"tmpfs": {
+					"type":   "disk",
+					"source": "tmpfs:",
+					"path":   "/tmp",
+					"size":   fmt.Sprintf("%dGiB", conf.TmpfsSizeInGb),
+				},
+			},
 		},
 	}
 

@@ -11,6 +11,7 @@ type Config struct {
 	BaseImage        string      `json:"baseImage" validate:"required"`
 	MaxCores         int         `json:"maxCores" validate:"min=0"`
 	MaxRamInGb       int         `json:"maxRamInGb" validate:"min=0"`
+	TmpfsSizeInGb    int         `json:"tmpfsSizeInGb" validate:"min=0"`
 	Azure            AzureConfig `json:"azure" validate:"required"`
 	ProvisionScripts []string    `json:"provisionScripts" validate:"dive,filepath"`
 }

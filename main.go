@@ -52,7 +52,11 @@ func main() {
 		BaseImage:   "ubuntu/24.04",
 		MaxCores:    8,
 		MaxRamInGb:  4,
-		AzurePAT:    string(bytes.TrimSpace(tokenData)),
+		Azure: AzureConfig{
+			PAT:  string(bytes.TrimSpace(tokenData)),
+			Url:  "https://dev.azure.com/questdb",
+			Pool: "hetzner-docker",
+		},
 	}
 
 	c, err := incus.ConnectIncusUnix("", nil)
@@ -256,7 +260,7 @@ func createAgent(ctx context.Context, c incus.InstanceServer, conf Config, idx i
 	}
 
 	if err = c.CreateInstanceFile(req.Name, "/home/agent/.token", incus.InstanceFileArgs{
-		Content:   strings.NewReader(conf.AzurePAT),
+		Content:   strings.NewReader(conf.Azure.PAT),
 		WriteMode: "overwrite",
 		Mode:      400,
 		UID:       1100,
@@ -279,9 +283,9 @@ func createAgent(ctx context.Context, c incus.InstanceServer, conf Config, idx i
 				"--agent",
 				fmt.Sprintf("%s-%d", hostname, idx),
 				"--pool",
-				"hetzner-docker",
+				conf.Azure.Pool,
 				"--url",
-				"https://dev.azure.com/questdb",
+				conf.Azure.Url,
 			},
 			Interactive: false,
 			WaitForWS:   true,
@@ -300,12 +304,19 @@ func createAgent(ctx context.Context, c incus.InstanceServer, conf Config, idx i
 }
 
 type Config struct {
-	ProjectName string `validate:"required"`
-	AgentCount  int    `validate:"min=1,max=64"`
-	BaseImage   string `validate:"required"`
-	MaxCores    int    `validate:"min=0"`
-	MaxRamInGb  int    `validate:"min=0"`
-	AzurePAT    string `validate:"required"`
+	ProjectName      string      `json:"projectName" validate:"required"`
+	AgentCount       int         `json:"agentCount" validate:"min=1,max=64"`
+	BaseImage        string      `json:"baseImage" validate:"required"`
+	MaxCores         int         `json:"maxCores" validate:"min=0"`
+	MaxRamInGb       int         `json:"maxRamInGb" validate:"min=0"`
+	Azure            AzureConfig `json:"azure" validate:"required"`
+	ProvisionScripts []string    `json:"provisionScripts" validate:"dive,filepath"`
+}
+
+type AzureConfig struct {
+	PAT  string `json:"pat" validate:"required"`
+	Pool string `json:"pool" validate:"required"`
+	Url  string `json:"url" validate:"required,url"`
 }
 
 func (c Config) AgentName(idx int) string {

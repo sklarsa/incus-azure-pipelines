@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
-	"embed"
+	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"math"
@@ -16,7 +18,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"text/template"
 	"time"
 
 	incus "github.com/lxc/incus/v6/client"
@@ -62,10 +63,12 @@ func main() {
 
 	c = c.UseProject(conf.ProjectName)
 
-	if err := provisionBaseInstance(context.Background(), c, conf); err != nil {
-		log.Fatal(err)
-	}
-	return
+	/*
+		if err := provisionBaseInstance(context.Background(), c, conf); err != nil {
+			log.Fatal(err)
+		}
+		return
+	*/
 
 	agentsToCreate := make(chan int)
 	go func() {
@@ -99,17 +102,20 @@ func main() {
 	defer listener.Disconnect()
 
 	t, err := listener.AddHandler(nil, func(e api.Event) {
-		fmt.Fprintf(os.Stdout, `New Event
-timestamp = %s
-type = %s
-data = %s
+		/*
+					fmt.Fprintf(os.Stdout, `New Event
+			timestamp = %s
+			type = %s
+			data = %s
 
-`,
-			e.Timestamp,
-			e.Type,
-			e.Metadata,
-		)
+			`,
+						e.Timestamp,
+						e.Type,
+						e.Metadata,
+					)
+		*/
 	})
+
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -218,7 +224,7 @@ func createAgent(ctx context.Context, c incus.InstanceServer, conf Config, idx i
 		return err
 	}
 
-	if err = c.CreateInstanceFile(req.Name, "/run/agent-token", incus.InstanceFileArgs{
+	if err = c.CreateInstanceFile(req.Name, "/home/agent/.token", incus.InstanceFileArgs{
 		Content:   strings.NewReader(conf.AzurePAT),
 		WriteMode: "overwrite",
 		Mode:      400,
@@ -228,53 +234,70 @@ func createAgent(ctx context.Context, c incus.InstanceServer, conf Config, idx i
 		return err
 	}
 
-	t := template.New("")
-	// todo: use parsefs to keep everything in one place or something idk
-	data, err := provisionScripts.ReadFile("baseimage/configure.sh")
+	hostname, err := os.Hostname()
 	if err != nil {
 		return err
 	}
-	if _, err = t.Parse(string(data)); err != nil {
-		return err
-	}
 
-	rendered := &bytes.Buffer{}
-	if err := t.Execute(rendered, map[string]string{
-		"AgentName":  fmt.Sprintf("testagent-%d", idx),
-		"ProjectUrl": "https://dev.azure.com/questdb",
-		"PoolName":   "hetzner-docker",
-	}); err != nil {
-		return err
-	}
+	go func() {
 
-	if err := c.CreateInstanceFile(
-		req.Name,
-		"/home/agent/configure.sh",
-		incus.InstanceFileArgs{
-			Content:   bytes.NewReader(rendered.Bytes()),
-			Mode:      0744,
-			WriteMode: "overwrite",
-			UID:       1100,
-			GID:       1100,
-		},
-	); err != nil {
-		return err
-	}
+		stdoutR, stdoutW := io.Pipe()
+		stderrR, stderrW := io.Pipe()
 
-	if _, err := c.ExecInstance(
-		req.Name,
-		api.InstanceExecPost{
-			Command: []string{
-				"systemctl start azure-agent",
+		defer stdoutW.Close()
+		defer stderrW.Close()
+
+		go streamLogs(ctx, stdoutR, slog.LevelInfo, req.Name)
+		go streamLogs(ctx, stderrR, slog.LevelError, req.Name)
+
+		op, err = c.ExecInstance(
+			req.Name,
+			api.InstanceExecPost{
+				Command: []string{
+					"/home/agent/run_agent.sh",
+					"--agent",
+					fmt.Sprintf("%s-%d", hostname, idx),
+					"--pool",
+					"hetzner-docker",
+					"--url",
+					"https://dev.azure.com/questdb",
+				},
+				Interactive: false,
+				WaitForWS:   true,
+				User:        1100,
+				Group:       1100,
 			},
-			Interactive: false,
-		},
-		&incus.InstanceExecArgs{},
-	); err != nil {
-		return err
-	}
+			&incus.InstanceExecArgs{
+				Stdout: stdoutW,
+				Stderr: stderrW,
+			},
+		)
+
+		if err != nil {
+			slog.Error("error running agent", "err", err, "instance", req.Name)
+			return
+		}
+
+		if err := op.WaitContext(ctx); err != nil {
+			slog.Error("error waiting for agent to finish", "err", err, "instance", req.Name)
+		}
+
+	}()
 
 	return nil
+}
+
+func streamLogs(ctx context.Context, r io.Reader, level slog.Level, name string) {
+	scanner := bufio.NewScanner(r)
+	buf := make([]byte, 4096)
+	scanner.Buffer(buf, 64*4096)
+	for scanner.Scan() {
+		slog.Log(ctx, level, scanner.Text(), "instance", name)
+	}
+
+	if err := scanner.Err(); err != nil {
+		slog.Error("read error", "err", err, "instance", name)
+	}
 }
 
 type Config struct {
@@ -333,11 +356,11 @@ func getAgentDownloadURL() (string, error) {
 	return url, nil
 }
 
-//go:embed baseimage/*
-var provisionScripts embed.FS
+//go:embed run_agent.sh
+var runAgentScript string
 
 func provisionBaseInstance(ctx context.Context, c incus.InstanceServer, conf Config) error {
-	i, _, err := c.GetInstance(defaultBaseInstance)
+	i, etag, err := c.GetInstance(defaultBaseInstance)
 
 	// Return on non-404 errors
 	if err != nil && !api.StatusErrorCheck(err, http.StatusNotFound) {
@@ -345,6 +368,7 @@ func provisionBaseInstance(ctx context.Context, c incus.InstanceServer, conf Con
 	}
 
 	// Delete base instance if it is found
+	// todo: actually just do this build in a tmp container or something and copy it
 	if err == nil {
 		// assumes base instance is already stopped
 		// todo: stop instance if it's not already
@@ -375,23 +399,6 @@ func provisionBaseInstance(ctx context.Context, c incus.InstanceServer, conf Con
 	}
 
 	if err = op.WaitContext(ctx); err != nil {
-		return err
-	}
-
-	svcFile, err := provisionScripts.ReadFile("baseimage/azure-agent.service")
-	if err != nil {
-		return err
-	}
-
-	if err := c.CreateInstanceFile(
-		req.Name,
-		"/etc/systemd/system/azure-agent.service",
-		incus.InstanceFileArgs{
-			Content:   bytes.NewReader(svcFile),
-			Mode:      0644,
-			WriteMode: "overwrite",
-		},
-	); err != nil {
 		return err
 	}
 
@@ -448,6 +455,33 @@ su - "${AGENT_USER}" -c "
 	}
 
 	op, err = c.ExecInstance(req.Name, execReq, args)
+	if err != nil {
+		return err
+	}
+
+	if err := op.WaitContext(ctx); err != nil {
+		return err
+	}
+
+	if err := c.CreateInstanceFile(
+		req.Name,
+		"/home/agent/run_agent.sh",
+		incus.InstanceFileArgs{
+			Content:   strings.NewReader(runAgentScript),
+			Mode:      0744,
+			WriteMode: "overwrite",
+			GID:       1100,
+			UID:       1100,
+		},
+	); err != nil {
+		return err
+	}
+
+	op, err = c.UpdateInstanceState(req.Name, api.InstanceStatePut{
+		Action: "stop",
+		// todo: add timeout
+	}, etag)
+
 	if err != nil {
 		return err
 	}

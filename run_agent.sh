@@ -4,7 +4,8 @@ set -euo pipefail
 LOG_FILE="${LOG_FILE:-/home/agent/azp-agent.log}"
 exec >> "$LOG_FILE" 2>&1
 
-cd /home/agent
+export HOME=/home/agent
+cd "${HOME}"
 
 TOKEN_FILE="/home/agent/.token"
 if [[ ! -f "$TOKEN_FILE" ]]; then

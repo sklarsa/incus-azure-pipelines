@@ -26,6 +26,8 @@ const (
 var (
 	agentRe        = regexp.MustCompile("^" + defaultAgentPrefix + `-(\d{1,2})$`)
 	agentsToCreate = make(chan int)
+
+	inFlight = &sync.Map{}
 )
 
 func main() {
@@ -105,6 +107,7 @@ func main() {
 	wg := &sync.WaitGroup{}
 
 	wg.Go(func() {
+
 		for {
 			idx, open := <-agentsToCreate
 			if !open {
@@ -113,13 +116,22 @@ func main() {
 
 			fmt.Printf("Creating agent %d\n", idx)
 
-			if err := createAgent(ctx, c, conf, idx); err != nil {
-				slog.Error("failed to create agent", "idx", idx, "err", err)
-			}
+			go func() {
+				defer inFlight.Delete(idx)
+
+				if err := createAgent(ctx, c, conf, idx); err != nil {
+					slog.Error("failed to create agent", "idx", idx, "err", err)
+				}
+			}()
+
 		}
 	})
 
 	wg.Go(func() {
+		if err = reconcileAgents(c, conf, agentsToCreate); err != nil {
+			slog.Error("reconcile failed", "err", err)
+		}
+
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 

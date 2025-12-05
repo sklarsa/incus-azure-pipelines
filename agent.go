@@ -130,7 +130,10 @@ func reconcileAgents(c incus.InstanceServer, conf Config, agentsToCreate chan<- 
 
 	for idx := range conf.AgentCount {
 		if (1<<idx)&instancesToCreate > 0 {
-			agentsToCreate <- idx
+			if _, exists := inFlight.LoadOrStore(idx, true); !exists {
+				agentsToCreate <- idx
+			}
+
 		}
 	}
 

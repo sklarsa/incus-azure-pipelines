@@ -2,7 +2,7 @@
 set -euo pipefail
 
 LOG_FILE="${LOG_FILE:-/home/agent/azp-agent.log}"
-exec &> >(tee -a "$LOG_FILE")
+exec >> "$LOG_FILE" 2>&1
 
 cd /home/agent
 

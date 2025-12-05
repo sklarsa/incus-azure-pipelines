@@ -1,13 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
+	"flag"
 	"fmt"
-	"io"
 	"log"
 	"log/slog"
 	"math"
@@ -36,6 +35,11 @@ var (
 
 func main() {
 
+	provision := flag.Bool("provision", false, "provision the base instance and exit")
+	logs := flag.Int("logs", -1, "get agent logs by index (0-base)")
+
+	flag.Parse()
+
 	tokenData, err := os.ReadFile("/tmp/azp_token")
 	if err != nil {
 		log.Fatal(err)
@@ -43,7 +47,7 @@ func main() {
 
 	conf := Config{
 		ProjectName: "azure-pipelines",
-		AgentCount:  8,
+		AgentCount:  1,
 		BaseImage:   "ubuntu/24.04",
 		MaxCores:    8,
 		MaxRamInGb:  4,
@@ -63,12 +67,36 @@ func main() {
 
 	c = c.UseProject(conf.ProjectName)
 
-	/*
+	if *provision {
+		fmt.Printf("provisioning base instance %q\n", conf.BaseImage)
 		if err := provisionBaseInstance(context.Background(), c, conf); err != nil {
 			log.Fatal(err)
 		}
 		return
-	*/
+	}
+
+	if *logs > -1 {
+
+		op, err := c.ExecInstance(
+			conf.AgentName(*logs),
+			api.InstanceExecPost{
+				Command:     []string{"cat", "/home/agent/azp-agent.log"},
+				WaitForWS:   true,
+				Interactive: false,
+			}, &incus.InstanceExecArgs{
+				Stdout: os.Stdout,
+			},
+		)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if err = op.Wait(); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	agentsToCreate := make(chan int)
 	go func() {
@@ -202,7 +230,9 @@ func createAgent(ctx context.Context, c incus.InstanceServer, conf Config, idx i
 		},
 		Start: true,
 		InstancePut: api.InstancePut{
-			Config:    map[string]string{},
+			Config: map[string]string{
+				"boot.host_shutdown_action": "force-stop",
+			},
 			Ephemeral: true,
 		},
 	}
@@ -239,65 +269,33 @@ func createAgent(ctx context.Context, c incus.InstanceServer, conf Config, idx i
 		return err
 	}
 
-	go func() {
-
-		stdoutR, stdoutW := io.Pipe()
-		stderrR, stderrW := io.Pipe()
-
-		defer stdoutW.Close()
-		defer stderrW.Close()
-
-		go streamLogs(ctx, stdoutR, slog.LevelInfo, req.Name)
-		go streamLogs(ctx, stderrR, slog.LevelError, req.Name)
-
-		op, err = c.ExecInstance(
-			req.Name,
-			api.InstanceExecPost{
-				Command: []string{
-					"/home/agent/run_agent.sh",
-					"--agent",
-					fmt.Sprintf("%s-%d", hostname, idx),
-					"--pool",
-					"hetzner-docker",
-					"--url",
-					"https://dev.azure.com/questdb",
-				},
-				Interactive: false,
-				WaitForWS:   true,
-				User:        1100,
-				Group:       1100,
+	op, err = c.ExecInstance(
+		req.Name,
+		api.InstanceExecPost{
+			Command: []string{
+				"setsid",
+				"/home/agent/run_agent.sh",
+				"--agent",
+				fmt.Sprintf("%s-%d", hostname, idx),
+				"--pool",
+				"hetzner-docker",
+				"--url",
+				"https://dev.azure.com/questdb",
 			},
-			&incus.InstanceExecArgs{
-				Stdout: stdoutW,
-				Stderr: stderrW,
-			},
-		)
+			Interactive: false,
+			WaitForWS:   true,
+			User:        1100,
+			Group:       1100,
+		},
+		&incus.InstanceExecArgs{},
+	)
 
-		if err != nil {
-			slog.Error("error running agent", "err", err, "instance", req.Name)
-			return
-		}
-
-		if err := op.WaitContext(ctx); err != nil {
-			slog.Error("error waiting for agent to finish", "err", err, "instance", req.Name)
-		}
-
-	}()
-
-	return nil
-}
-
-func streamLogs(ctx context.Context, r io.Reader, level slog.Level, name string) {
-	scanner := bufio.NewScanner(r)
-	buf := make([]byte, 4096)
-	scanner.Buffer(buf, 64*4096)
-	for scanner.Scan() {
-		slog.Log(ctx, level, scanner.Text(), "instance", name)
+	if err != nil {
+		return err
 	}
 
-	if err := scanner.Err(); err != nil {
-		slog.Error("read error", "err", err, "instance", name)
-	}
+	return op.WaitContext(ctx)
+
 }
 
 type Config struct {

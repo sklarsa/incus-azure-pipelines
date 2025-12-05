@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+LOG_FILE="${LOG_FILE:-/home/agent/azp-agent.log}"
+exec &> >(tee -a "$LOG_FILE")
+
 cd /home/agent
 
 TOKEN_FILE="/home/agent/.token"
@@ -26,12 +29,12 @@ cleanup() {
     }
   fi
 
-  sudo shutdown now
+  sudo poweroff -f
 }
 
-trap "cleanup; exit 0" EXIT
-trap "cleanup; exit 130" INT
-trap "cleanup; exit 143" TERM
+trap cleanup EXIT
+trap "exit 130" INT
+trap "exit 143" TERM
 
 ./config.sh --unattended \
   --auth "PAT" \

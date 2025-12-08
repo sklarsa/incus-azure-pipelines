@@ -42,22 +42,28 @@ func main() {
 		cancel()
 	}()
 
-	// todo: add a run flag and display help if no flag passed
+	var (
+		run        bool
+		provision  bool
+		logs       int
+		configPath string
+	)
 
-	provision := flag.Bool("provision", false, "provision the base instance and exit")
-	logs := flag.Int("logs", -1, "get agent logs by index (0-base)")
-	configPath := flag.String("config", "./config.yaml", "path of config file")
+	flag.BoolVar(&run, "run", false, "run the orchestrator daemon")
+	flag.BoolVar(&provision, "provision", false, "provision the base instance and exit")
+	flag.IntVar(&logs, "logs", -1, "get agent logs by index (base 0)")
+	flag.StringVar(&configPath, "config", "./config.yaml", "path of config file")
 
 	flag.Parse()
 
-	data, err := os.ReadFile(*configPath)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
-		log.Fatalf("error reading config at %s: %s", *configPath, err.Error())
+		log.Fatalf("error reading config at %s: %s", configPath, err.Error())
 	}
 
 	conf, err := parseConfig(data)
 	if err != nil {
-		log.Fatalf("error parsing config at %s: %s", *configPath, err.Error())
+		log.Fatalf("error parsing config at %s: %s", configPath, err.Error())
 	}
 
 	c, err := incus.ConnectIncusUnix("", nil)
@@ -73,7 +79,7 @@ func main() {
 
 	c = c.UseProject(conf.ProjectName)
 
-	if *provision {
+	if provision {
 		fmt.Printf("provisioning base instance %q\n", conf.BaseImage)
 		if err := provisionBaseInstance(ctx, c, conf); err != nil {
 			log.Fatal(err)
@@ -81,10 +87,10 @@ func main() {
 		return
 	}
 
-	if *logs > -1 {
+	if logs > -1 {
 
 		op, err := c.ExecInstance(
-			agentName(*logs),
+			agentName(logs),
 			api.InstanceExecPost{
 				Command:     []string{"cat", "/home/agent/azp-agent.log"},
 				WaitForWS:   true,
@@ -104,51 +110,57 @@ func main() {
 		return
 	}
 
-	wg := &sync.WaitGroup{}
+	if run {
 
-	wg.Go(func() {
+		wg := &sync.WaitGroup{}
 
-		for {
-			idx, open := <-agentsToCreate
-			if !open {
-				return
+		wg.Go(func() {
+
+			for {
+				idx, open := <-agentsToCreate
+				if !open {
+					return
+				}
+
+				fmt.Printf("Creating agent %d\n", idx)
+
+				go func() {
+					defer inFlight.Delete(idx)
+
+					if err := createAgent(ctx, c, conf, idx); err != nil {
+						slog.Error("failed to create agent", "idx", idx, "err", err)
+					}
+				}()
+
+			}
+		})
+
+		wg.Go(func() {
+			if err = reconcileAgents(c, conf, agentsToCreate); err != nil {
+				slog.Error("reconcile failed", "err", err)
 			}
 
-			fmt.Printf("Creating agent %d\n", idx)
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
 
-			go func() {
-				defer inFlight.Delete(idx)
-
-				if err := createAgent(ctx, c, conf, idx); err != nil {
-					slog.Error("failed to create agent", "idx", idx, "err", err)
-				}
-			}()
-
-		}
-	})
-
-	wg.Go(func() {
-		if err = reconcileAgents(c, conf, agentsToCreate); err != nil {
-			slog.Error("reconcile failed", "err", err)
-		}
-
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				close(agentsToCreate)
-				return
-			case <-ticker.C:
-				if err = reconcileAgents(c, conf, agentsToCreate); err != nil {
-					slog.Error("reconcile failed", "err", err)
+			for {
+				select {
+				case <-ctx.Done():
+					close(agentsToCreate)
+					return
+				case <-ticker.C:
+					if err = reconcileAgents(c, conf, agentsToCreate); err != nil {
+						slog.Error("reconcile failed", "err", err)
+					}
 				}
 			}
-		}
-	})
+		})
 
-	wg.Wait()
+		wg.Wait()
+	}
+
+	flag.PrintDefaults()
+	os.Exit(-1)
 
 }
 

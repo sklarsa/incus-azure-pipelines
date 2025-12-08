@@ -19,7 +19,15 @@ import (
 var runAgentScript string
 
 func provisionBaseInstance(ctx context.Context, c incus.InstanceServer, conf Config) error {
-	// todo: check that provisions scripts exist before doing anything
+	// First check that all provisioning scripts exist
+	provisioningScripts := [][]byte{}
+	for _, f := range conf.ProvisionScripts {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			return fmt.Errorf("error reading script %s: %w", f, err)
+		}
+		provisioningScripts = append(provisioningScripts, data)
+	}
 
 	i, _, err := c.GetInstance(defaultBaseInstance)
 
@@ -146,25 +154,20 @@ su - "${AGENT_USER}" -c "
 	}
 
 	// Now execute custom provisioning scripts
-	for _, f := range conf.ProvisionScripts {
-		data, err := os.ReadFile(f)
-		if err != nil {
-			return fmt.Errorf("error reading script %s: %w", f, err)
-		}
-
+	for idx, s := range provisioningScripts {
 		args := &incus.InstanceExecArgs{
-			Stdin:  bytes.NewReader(data),
+			Stdin:  bytes.NewReader(s),
 			Stdout: os.Stdout,
 			Stderr: os.Stderr,
 		}
 
 		op, err = c.ExecInstance(req.Name, execReq, args)
 		if err != nil {
-			return fmt.Errorf("error executing script %s: %w", f, err)
+			return fmt.Errorf("error executing script %s: %w", conf.ProvisionScripts[idx], err)
 		}
 
 		if err := op.WaitContext(ctx); err != nil {
-			return fmt.Errorf("error executing script %s: %w", f, err)
+			return fmt.Errorf("error executing script %s: %w", conf.ProvisionScripts[idx], err)
 		}
 
 	}

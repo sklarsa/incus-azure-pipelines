@@ -45,9 +45,9 @@ I do recommend using a storage backend that supports Copy on Write (COW), like b
 
 I also recommend creating a separate Incus project for your pipeline runners to keep everything isolated. But be careful! When doing this, you **need to create a profile for the new project** before using it, otherwise you'll have problems.
 
-### Configure and run
+### Configure
 
-Once you're finished with your Incus setup, it's time to run the orchestrator. 
+Once you're finished with your Incus setup, it's time get cooking with this software. 
 
 First, you need to craft a config file
 
@@ -61,13 +61,26 @@ maxCores: 8
 maxRamInGb: 4
 tmpfsSizeInGb: 12
 provisionScripts:
-- /tmp/script
+- /tmp/script1.sh
+- /tmp/script2.sh
 azure:
   pat: myVerySecretPatHere
   url: https://dev.azure.com/<my-organization>
   pool: myAgentPool
 ```
 
-Then, start the orchestrator using some daemonizer (most likely systemd, let's be honest) and see your Agents come to life.
+### Create a base container
 
-The command to run the orchestrator is `incus-azure-pipelines -run -config $PATH_OF_CONFIG_FILE`
+```bash
+incus-azure-pipelines -provision -config $PATH_OF_CONFIG_FILE
+```
+
+### Run the orchestrator
+
+Finally, start the orchestrator using some daemonizer (most likely systemd, let's be honest) and see your Agents come to life.
+
+The command to run the orchestrator is 
+
+```bash
+incus-azure-pipelines -run -config $PATH_OF_CONFIG_FILE`
+```

@@ -72,11 +72,6 @@ func main() {
 	}
 	defer c.Disconnect()
 
-	// todo: we need to make sure the project has a profile, since new projects created with empty profile that doesn't work
-	if err = ensureProject(c, conf.ProjectName); err != nil {
-		log.Fatal(err)
-	}
-
 	c = c.UseProject(conf.ProjectName)
 
 	if provision {
@@ -162,21 +157,4 @@ func main() {
 	flag.PrintDefaults()
 	os.Exit(-1)
 
-}
-
-func ensureProject(c incus.InstanceServer, name string) error {
-	projects, err := c.GetProjectNames()
-	if err != nil {
-		return fmt.Errorf("error listing project names: %w", err)
-	}
-
-	for _, p := range projects {
-		if p == name {
-			return nil
-		}
-	}
-
-	return c.CreateProject(api.ProjectsPost{
-		Name: name,
-	})
 }

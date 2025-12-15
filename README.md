@@ -3,18 +3,18 @@
 This project aims to provide a runtime for self-hosted Azure Pipelines Agents inside ephemeral [Incus](https://linuxcontainers.org/incus/) system containers.
 
 The goals of this project are to:
-1. Provide an OS-like testing environment. This includes services like systemd, and the ability to run a docker daemon.
-2. Use independent environments for every job. Azure self-hosted agents do not clean themselves up by default, which can lead to problems like running out of disk space, or difficulty in creating reproduceable builds.
+1. Provide an OS-like testing environment for Azure Pipelines Agents. This includes access to services like systemd and the ability to easily run a docker daemon.
+2. Use independent environments for every job. Azure self-hosted agents do not clean themselves up by default, which can lead to problems like running out of disk space on the host, or difficulty in creating reproduceable builds.
 
 ## Why go through all of this trouble?
 
 It appears that Azure Devops limits the maximum amount of parallelism to 25 Azure-hosted agents. Even if you want to pay for more, the UI won't let you do it. At least on whatever plan my organization is using.
 
-But there's **no limit!!** to the parallelism of self-hosted workers. We started with an AWS lambda that spun up an EC2 instance for each job, but this added a lot more complexity to the infrastructure and the entire process was very opaque. It also started getting expensive.
+But there's **no limit!!** to the parallelism of self-hosted workers. We started with an AWS lambda that spun up an EC2 instance for each Azure job, but this added a lot more complexity to the infrastructure and the entire process was very opaque. It also started getting expensive.
 
-We then started running Azure Pipelines Agents in Docker containers running on Hetzner auction servers. Price-and-complexity-wise, this was a great win! But we were still missing things like clean Docker-in-Docker builds, had to ensure that _every_ job cleaned itself up appropriately, and still ended up with a mess of a test execution environment.
+So we rented a bunch of Hetzner auction servers and ran long-lived agents in Docker containers. Price-and-complexity-wise, this was a great win for us (as compared to the lambda-driven method)! But we were still missing clean Docker-in-Docker builds, had to ensure that _every_ job cleaned itself up appropriately (by marking it as `workspace.clean = all` in the pipeline yaml), and still ended up with a mess of a test execution environment after running heterogeneous tests that installed various packages and utilities along the way.
 
-Finally, I hatched a plan to use ephemeral "system containers" and the `./run.sh --once` option to solve some of these pain points. And this is what resulted!
+Finally, I hatched a plan to use ephemeral "system containers" and the `./run.sh --once` option to solve some of these pain points. And this is what resulted from that work!
 
 ## How it works
 
@@ -22,16 +22,16 @@ Finally, I hatched a plan to use ephemeral "system containers" and the `./run.sh
 1. A new container is created by `copy`ing a base container as its source
 2. The container boots
 3. The orchestrator injects credentials used to register the agent onto the container's filesystem
-4. The orchestrator execs a wrapper script that:
-    - reads the credentials into memory
-    - deletes the credentials file
-    - runs `./config.sh` to register the agent
-    - runs `./run.sh --once` to pick up a single CI job
-    - issues `sudo poweroff -f` after the job is complete
+4. The orchestrator execs a pre-installed wrapper script that:
+    - Reads the credentials into memory
+    - Deletes the credentials file
+    - Runs `./config.sh` to register the agent
+    - Runs `./run.sh --once` to pick up a single CI job
+    - Issues `sudo poweroff -f` after the job is complete
 5. Since we are using ephemeral containers, on shutdown, the container will be reaped automatically by the Incus daemon
 6. The orchestrator will be notified that it needs to replace the deleted agent one of two ways:
-    - identifying that the agent container has been deleted via a subscription to the Incus event stream
-    - a regularly-scheduled reconcile job which ensures all required agent containers exist
+    - Identifying that the agent container has been deleted via a subscription to the Incus event stream
+    - A regularly-scheduled reconcile job which ensures all required agent containers exist
 
 ## How to deploy it
 
@@ -39,23 +39,22 @@ Finally, I hatched a plan to use ephemeral "system containers" and the `./run.sh
 
 ### Setup Incus
 
-First, you need a deployed and running version of Incus. There are more knobs to tweak here than simply installing `docker`, so I leave this an an exercise for the user.
+First, you need a deployed and running version of Incus. There are more knobs to tweak here than simply installing `docker`, so I leave this an an exercise to the user.
 
-I do recommend using a storage backend that supports Copy on Write (COW), like btrfs or zfs. These will make your new Agent containers spin up almost instantly, instead of having to wait for the Incus daemon to unpack and write the contents of the base container.
+I do recommend using a storage backend that supports Copy on Write (COW), like btrfs or zfs. This will make your new Agent containers spin up almost instantly, instead of having to wait for the Incus daemon to unpack and write the contents of the base container image to the new container's image location.
 
-I also recommend creating a separate Incus project for your pipeline runners to keep everything isolated. But be careful! When doing this, you **need to create a profile for the new project** before using it, otherwise you'll have problems.
+I also recommend creating a separate Incus project for your pipeline runners to keep everything isolated. But be careful! When doing this, you **need to create a profile for the new project** before using it, otherwise you'll have problems and won't be able to run any containers.
 
 ### Configure
 
 Once you're finished with your Incus setup, it's time get cooking with this software. 
 
-First, you need to craft a config file
-
+First, you need to craft a config file:
 
 ```yaml
 ---
 projectName: azure-pipelines
-agentCount: 2
+agentCount: 8
 baseImage: ubuntu/24.04
 maxCores: 8
 maxRamInGb: 4
@@ -69,7 +68,9 @@ azure:
   pool: myAgentPool
 ```
 
-### Create a base container
+### Create a base image
+
+Since agent containers are created by copying an existing base container, we need to first build that base container
 
 ```bash
 incus-azure-pipelines -provision -config $PATH_OF_CONFIG_FILE

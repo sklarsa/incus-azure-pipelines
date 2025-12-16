@@ -115,16 +115,17 @@ func main() {
 					return
 				}
 
-				fmt.Printf("Creating agent %d\n", idx)
+				if _, exists := inFlight.LoadOrStore(idx, true); !exists {
+					go func() {
+						defer inFlight.Delete(idx)
 
-				go func() {
-					defer inFlight.Delete(idx)
+						fmt.Printf("Creating agent %d\n", idx)
 
-					if err := createAgent(ctx, c, conf, idx); err != nil {
-						slog.Error("failed to create agent", "idx", idx, "err", err)
-					}
-				}()
-
+						if err := createAgent(ctx, c, conf, idx); err != nil {
+							slog.Error("failed to create agent", "idx", idx, "err", err)
+						}
+					}()
+				}
 			}
 		})
 

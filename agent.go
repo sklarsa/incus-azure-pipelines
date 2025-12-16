@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -12,14 +13,20 @@ import (
 	"github.com/lxc/incus/v6/shared/api"
 )
 
+var (
+	agentRe = regexp.MustCompile("^" + defaultAgentPrefix + `-(\d{1,2})$`)
+)
+
 func createAgent(ctx context.Context, c incus.InstanceServer, conf Config, idx int) error {
+
+	// todo: check for base image existence
 
 	req := api.InstancesPost{
 		Name: agentName(idx),
 		Type: api.InstanceTypeContainer,
 		Source: api.InstanceSource{
-			Source: defaultBaseInstance,
-			Type:   "copy",
+			Alias: defaultImageAlias,
+			Type:  "image",
 		},
 		Start: true,
 		InstancePut: api.InstancePut{
@@ -115,9 +122,6 @@ func reconcileAgents(c incus.InstanceServer, conf Config, agentsToCreate chan<- 
 	}
 
 	for _, i := range instances {
-		if i.Name == defaultBaseInstance {
-			continue
-		}
 
 		matches := agentRe.FindStringSubmatch(i.Name)
 		if matches == nil {

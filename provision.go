@@ -6,13 +6,16 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 
 	incus "github.com/lxc/incus/v6/client"
 	"github.com/lxc/incus/v6/shared/api"
+	"github.com/schollz/progressbar/v3"
 )
 
 //go:embed run_agent.sh
@@ -29,34 +32,16 @@ func provisionBaseInstance(ctx context.Context, c incus.InstanceServer, conf Con
 		provisioningScripts = append(provisioningScripts, data)
 	}
 
-	i, _, err := c.GetInstance(defaultBaseInstance)
-
-	// Return on non-404 errors
-	if err != nil && !api.StatusErrorCheck(err, http.StatusNotFound) {
-		return err
+	suffix, err := randomString(8)
+	if err != nil {
+		return fmt.Errorf("error generating random string: %w", err)
 	}
-
-	// Delete base instance if it is found
-	// todo: actually just do this build in a tmp container or something and copy it
-	if err == nil {
-		// assumes base instance is already stopped
-		// todo: stop instance if it's not already
-		op, err := c.DeleteInstance(i.Name)
-		if err != nil {
-			return err
-		}
-
-		if err = op.WaitContext(ctx); err != nil {
-			return err
-		}
-	}
-
-	// todo: pull the base image if it does not exist
 
 	req := api.InstancesPost{
-		Name: defaultBaseInstance,
+		Name: fmt.Sprintf("%s-builder-%s", defaultImageAlias, suffix),
 		Source: api.InstanceSource{
 			Type:     "image",
+			Mode:     "pull",
 			Alias:    conf.BaseImage,
 			Server:   "https://images.linuxcontainers.org",
 			Protocol: "simplestreams",
@@ -64,12 +49,20 @@ func provisionBaseInstance(ctx context.Context, c incus.InstanceServer, conf Con
 		Type:  "container",
 		Start: true,
 	}
+
+	slog.Info("creating", "instance", req.Name)
+
 	op, err := c.CreateInstance(req)
 	if err != nil {
 		return err
 	}
 
 	if err = op.WaitContext(ctx); err != nil {
+		return err
+	}
+
+	i, etag, err := c.GetInstance(req.Name)
+	if err != nil {
 		return err
 	}
 
@@ -134,11 +127,6 @@ su - "${AGENT_USER}" -c "
 		return err
 	}
 
-	i, etag, err := c.GetInstance(defaultBaseInstance)
-	if err != nil {
-		return err
-	}
-
 	if err := c.CreateInstanceFile(
 		req.Name,
 		"/home/agent/run_agent.sh",
@@ -172,7 +160,8 @@ su - "${AGENT_USER}" -c "
 
 	}
 
-	// Finally, stop the instance so it can be used for copies
+	// Stop the instance so it can published
+	slog.Info("stopping instance", "instance", i.Name)
 	op, err = c.UpdateInstanceState(req.Name, api.InstanceStatePut{
 		Action: "stop",
 		// todo: add timeout
@@ -182,7 +171,115 @@ su - "${AGENT_USER}" -c "
 		return err
 	}
 
-	return op.WaitContext(ctx)
+	if err := op.WaitContext(ctx); err != nil {
+		return err
+	}
+
+	defer func() {
+
+		op, err := c.DeleteInstance(i.Name)
+		if err != nil {
+			slog.Error("error deleting", "instance", i.Name, "err", err)
+			return
+		}
+
+		if err = op.WaitContext(ctx); err != nil {
+			slog.Error("error deleting", "instance", i.Name, "err", err)
+			return
+		}
+
+	}()
+
+	// Publish the image
+	slog.Info("publishing image", "instance", i.Name, "target", defaultImageAlias)
+	op, err = c.CreateImage(
+		api.ImagesPost{
+			Source: &api.ImagesPostSource{
+				Name: i.Name,
+				Type: "container",
+			},
+			ImagePut: api.ImagePut{
+				Properties: map[string]string{
+					"description": fmt.Sprintf("azure pipeline runner built on %s", conf.BaseImage),
+				},
+			},
+		},
+		nil,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	p := progressbar.NewOptions64(100,
+		progressbar.OptionSetDescription("publishing progress"),
+		progressbar.OptionSetWriter(os.Stderr),
+		progressbar.OptionFullWidth(),
+		progressbar.OptionOnCompletion(func() {
+			fmt.Fprint(os.Stderr, "\n")
+		}),
+	)
+	defer p.Close()
+
+	_, err = op.AddHandler(func(o api.Operation) {
+		if o.Metadata == nil {
+			return
+		}
+
+		for k, v := range o.Metadata {
+			if k != "progress" {
+				continue
+			}
+
+			data, ok := v.(map[string]any)
+			if !ok {
+				return
+			}
+
+			percStr, ok := data["percent"].(string)
+			if !ok {
+				return
+			}
+
+			perc, err := strconv.Atoi(percStr)
+			if err != nil {
+				return
+			}
+
+			_ = p.Set(perc)
+
+		}
+	})
+
+	if err = op.WaitContext(ctx); err != nil {
+		return err
+	}
+
+	// Grab the fingerprint
+	fingerprint, ok := op.Get().Metadata["fingerprint"].(string)
+	if !ok {
+		return fmt.Errorf("error getting fingerprint for new image")
+	}
+
+	// Before aliasing the image, delete any existing aliases
+	_, _, err = c.GetImageAlias(defaultImageAlias)
+	if err != nil {
+		if !api.StatusErrorCheck(err, http.StatusNotFound) {
+			return err
+		}
+	} else {
+		if err = c.DeleteImageAlias(defaultImageAlias); err != nil {
+			return fmt.Errorf("error deleting the alias from old image: %w", err)
+		}
+	}
+
+	// Now create the alias for the image
+	ciReq := api.ImageAliasesPost{}
+	ciReq.Name = defaultImageAlias
+	ciReq.Type = "container"
+	ciReq.Target = fingerprint
+
+	return c.CreateImageAlias(ciReq)
 
 }
 

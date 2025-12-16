@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"regexp"
 	"sync"
 	"syscall"
 	"time"
@@ -18,13 +17,12 @@ import (
 )
 
 const (
-	defaultAgentPrefix  = "azp-agent"
-	defaultBaseInstance = "azp-agent-base"
-	agentUser           = "agent"
+	defaultAgentPrefix = "azp-agent"
+	defaultImageAlias  = "azp-agent"
+	agentUser          = "agent"
 )
 
 var (
-	agentRe        = regexp.MustCompile("^" + defaultAgentPrefix + `-(\d{1,2})$`)
 	agentsToCreate = make(chan int)
 
 	inFlight = &sync.Map{}

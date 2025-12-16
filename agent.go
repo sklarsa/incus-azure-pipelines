@@ -66,8 +66,8 @@ func createAgent(ctx context.Context, c incus.InstanceServer, conf Config, idx i
 		Content:   strings.NewReader(conf.Azure.PAT),
 		WriteMode: "overwrite",
 		Mode:      400,
-		UID:       1100,
-		GID:       1100,
+		UID:       agentUid,
+		GID:       agentGid,
 	}); err != nil {
 		return err
 	}
@@ -93,8 +93,8 @@ func createAgent(ctx context.Context, c incus.InstanceServer, conf Config, idx i
 			},
 			Interactive: false,
 			WaitForWS:   true,
-			User:        1100,
-			Group:       1100,
+			User:        agentUid,
+			Group:       agentGid,
 		},
 		&incus.InstanceExecArgs{},
 	)

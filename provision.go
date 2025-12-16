@@ -81,13 +81,15 @@ func provisionBaseInstance(ctx context.Context, c incus.InstanceServer, conf Con
 set -euo pipefail
 AGENT_URL="` + agentURL + `"
 AGENT_USER="` + agentUser + `"
+AGENT_UID="` + strconv.Itoa(agentUid) + `"
+AGENT_GID="` + strconv.Itoa(agentGid) + `"
 AGENT_HOME="/home/${AGENT_USER}"
 
 apt-get update
 apt-get install -y curl wget tar sudo
 
-groupadd --gid 1100 "${AGENT_USER}"
-useradd -m -s /bin/bash --uid 1100 --gid 1100 "${AGENT_USER}"
+groupadd --gid ${AGENT_GID} "${AGENT_USER}"
+useradd -m -s /bin/bash --uid ${AGENT_UID} --gid ${AGENT_GID} "${AGENT_USER}"
 echo "${AGENT_USER} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${AGENT_USER}
 chmod 440 /etc/sudoers.d/${AGENT_USER}
 
@@ -134,8 +136,8 @@ su - "${AGENT_USER}" -c "
 			Content:   strings.NewReader(runAgentScript),
 			Mode:      0744,
 			WriteMode: "overwrite",
-			GID:       1100,
-			UID:       1100,
+			GID:       agentGid,
+			UID:       agentUid,
 		},
 	); err != nil {
 		return err

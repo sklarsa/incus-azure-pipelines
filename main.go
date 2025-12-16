@@ -22,6 +22,8 @@ const (
 	defaultAgentPrefix = "azp-agent"
 	defaultImageAlias  = "azp-agent"
 	agentUser          = "agent"
+	agentUid           = 1100
+	agentGid           = 1100
 )
 
 var (

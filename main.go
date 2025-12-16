@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -29,16 +31,6 @@ var (
 )
 
 func main() {
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigCh
-		cancel()
-	}()
 
 	var (
 		run        bool
@@ -69,6 +61,70 @@ func main() {
 		log.Fatal(err)
 	}
 	defer c.Disconnect()
+
+	listener, err := c.GetEvents()
+	if err != nil {
+		slog.Error("error setting up incus event listener", "err", err)
+		listener = nil
+	}
+
+	h, err := listener.AddHandler(nil, func(e api.Event) {
+
+		meta := map[string]any{}
+		if err := json.Unmarshal(e.Metadata, &meta); err != nil {
+			slog.Error("error unmarshaling event", "err", err, "meta", meta)
+			return
+		}
+
+		if meta["level"] == "info" &&
+			meta["message"] == "Deleted instance" {
+
+			context, ok := meta["context"].(map[string]any)
+			if !ok {
+				slog.Warn("unexpected event format, no 'context' map found", "data", e)
+				return
+			}
+
+			project := context["project"].(string)
+			instance := context["instance"].(string)
+
+			if project != conf.ProjectName {
+				return
+			}
+
+			matches := agentRe.FindStringSubmatch(instance)
+			if len(matches) >= 1 {
+				slog.Info("container deleted", "name", instance, "project", project)
+				idx, err := strconv.Atoi(matches[1])
+				if err != nil {
+					slog.Error("agent name should end in an integer, something went wrong", "name", instance)
+					return
+				}
+				agentsToCreate <- idx
+			}
+		}
+
+	})
+
+	if err != nil {
+		slog.Error("error adding incus event handler", "err", err)
+		listener = nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigCh
+		cancel()
+		if listener != nil {
+			listener.RemoveHandler(h)
+			listener.Disconnect()
+		}
+
+	}()
 
 	c = c.UseProject(conf.ProjectName)
 
@@ -119,7 +175,7 @@ func main() {
 					go func() {
 						defer inFlight.Delete(idx)
 
-						fmt.Printf("Creating agent %d\n", idx)
+						slog.Info("creating agent", "idx", idx)
 
 						if err := createAgent(ctx, c, conf, idx); err != nil {
 							slog.Error("failed to create agent", "idx", idx, "err", err)
@@ -150,7 +206,12 @@ func main() {
 			}
 		})
 
+		wg.Go(func() {
+			listener.Wait()
+		})
+
 		wg.Wait()
+		return
 	}
 
 	flag.PrintDefaults()

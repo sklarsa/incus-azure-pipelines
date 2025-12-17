@@ -66,8 +66,7 @@ func main() {
 
 	listener, err := c.GetEvents()
 	if err != nil {
-		slog.Error("error setting up incus event listener", "err", err)
-		listener = nil
+		log.Fatalf("error setting up incus event listener: %s", err.Error())
 	}
 
 	h, err := listener.AddHandler(nil, func(e api.Event) {
@@ -110,7 +109,6 @@ func main() {
 
 	if err != nil {
 		slog.Error("error adding incus event handler", "err", err)
-		listener = nil
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -121,10 +119,9 @@ func main() {
 	go func() {
 		<-sigCh
 		cancel()
-		if listener != nil {
-			listener.RemoveHandler(h)
-			listener.Disconnect()
-		}
+
+		listener.RemoveHandler(h)
+		listener.Disconnect()
 
 	}()
 

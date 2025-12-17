@@ -118,10 +118,11 @@ func main() {
 
 	go func() {
 		<-sigCh
-		cancel()
 
 		listener.RemoveHandler(h)
 		listener.Disconnect()
+
+		cancel()
 
 	}()
 

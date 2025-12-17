@@ -217,6 +217,7 @@ func main() {
 			slog.Info("exiting goroutine", "type", "event-listener")
 		})
 
+		wg.Wait()
 		return
 	}
 

@@ -164,10 +164,12 @@ func main() {
 		wg := &sync.WaitGroup{}
 
 		wg.Go(func() {
+			slog.Info("starting goroutine", "type", "agent-builder")
 
 			for {
 				idx, open := <-agentsToCreate
 				if !open {
+					slog.Info("exiting goroutine", "type", "agent-builder")
 					return
 				}
 
@@ -186,6 +188,8 @@ func main() {
 		})
 
 		wg.Go(func() {
+			slog.Info("starting goroutine", "type", "reconciler")
+
 			if err = reconcileAgents(c, conf, agentsToCreate); err != nil {
 				slog.Error("reconcile failed", "err", err)
 			}
@@ -197,6 +201,7 @@ func main() {
 				select {
 				case <-ctx.Done():
 					close(agentsToCreate)
+					slog.Info("exiting goroutine", "type", "reconciler")
 					return
 				case <-ticker.C:
 					if err = reconcileAgents(c, conf, agentsToCreate); err != nil {
@@ -207,10 +212,11 @@ func main() {
 		})
 
 		wg.Go(func() {
+			slog.Info("starting goroutine", "type", "event-listener")
 			listener.Wait()
+			slog.Info("exiting goroutine", "type", "event-listener")
 		})
 
-		wg.Wait()
 		return
 	}
 

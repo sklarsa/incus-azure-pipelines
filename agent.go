@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"regexp"
@@ -14,7 +15,8 @@ import (
 )
 
 var (
-	agentRe = regexp.MustCompile("^" + defaultAgentPrefix + `-(\d{1,2})$`)
+	agentRe            = regexp.MustCompile("^" + defaultAgentPrefix + `-(\d{1,2})$`)
+	containersToIgnore = map[string]bool{}
 )
 
 func createAgent(ctx context.Context, c incus.InstanceServer, conf Config, idx int) error {
@@ -122,12 +124,15 @@ func reconcileAgents(c incus.InstanceServer, conf Config, agentsToCreate chan<- 
 	}
 
 	for _, i := range instances {
+		if _, found := containersToIgnore[i.Name]; found {
+			continue
+		}
 
 		matches := agentRe.FindStringSubmatch(i.Name)
 		if matches == nil {
-			// todo: delete the agent if it's invalid
-			return fmt.Errorf("invalid agent name %q", i.Name)
-
+			containersToIgnore[i.Name] = true
+			slog.Warn("ignoring container", "name", i.Name, "reason", "no regexp match on name")
+			continue
 		}
 
 		idx, err := strconv.Atoi(matches[1])

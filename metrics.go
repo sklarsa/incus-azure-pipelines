@@ -7,6 +7,7 @@ import (
 	incus "github.com/lxc/incus/v6/client"
 	"github.com/lxc/incus/v6/shared/api"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 type agentUptimeCollector struct {
@@ -56,3 +57,17 @@ func (c *agentUptimeCollector) Collect(ch chan<- prometheus.Metric) {
 
 	}
 }
+
+var agentsCreatedMetric = promauto.NewCounter(
+	prometheus.CounterOpts{
+		Name: "iap_agents_created",
+		Help: "Count of the number of agents created by the orchestrator",
+	},
+)
+
+var agentsCreatedErrorMetric = promauto.NewCounter(
+	prometheus.CounterOpts{
+		Name: "iap_agents_created_errors",
+		Help: "Count of the number of errors that have occurred while creating an agent",
+	},
+)

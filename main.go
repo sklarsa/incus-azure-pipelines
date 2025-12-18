@@ -185,7 +185,11 @@ func main() {
 
 						if err := createAgent(ctx, c, conf, idx); err != nil {
 							slog.Error("failed to create agent", "idx", idx, "err", err)
+							agentsCreatedErrorMetric.Add(1)
+							return
 						}
+
+						agentsCreatedMetric.Add(1)
 					}()
 				}
 			}

@@ -249,6 +249,7 @@ func main() {
 				server.Shutdown(shutdownCtx)
 			}()
 
+			slog.Info("binding metrics-server", "port", conf.MetricsPort)
 			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				slog.Error("metrics server error", "error", err)
 			}

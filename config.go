@@ -24,6 +24,8 @@ type Config struct {
 	// ProvisionScripts is a list of local file paths containing scripts that are run after the initial
 	// base image provisioning. This allows users to customize their agent environments.
 	ProvisionScripts []string `json:"provisionScripts" validate:"dive,filepath"`
+	// MetricsPort is the port number that servers prometheus metrics
+	MetricsPort int `json:"metricsPort" validate:"min=0"`
 }
 
 type AzureConfig struct {

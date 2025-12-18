@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -16,6 +17,8 @@ import (
 
 	incus "github.com/lxc/incus/v6/client"
 	"github.com/lxc/incus/v6/shared/api"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const (
@@ -24,6 +27,7 @@ const (
 	agentUser          = "agent"
 	agentUid           = 1100
 	agentGid           = 1100
+	defaultMetricsPort = 9922
 )
 
 var (
@@ -215,6 +219,37 @@ func main() {
 			slog.Info("starting goroutine", "type", "event-listener")
 			listener.Wait()
 			slog.Info("exiting goroutine", "type", "event-listener")
+		})
+
+		wg.Go(func() {
+			agentUptime := newAgentUptimeCollector(c)
+			prometheus.MustRegister(agentUptime)
+
+			slog.Info("starting goroutine", "type", "metrics-server")
+			if conf.MetricsPort == 0 {
+				conf.MetricsPort = defaultMetricsPort
+			}
+
+			mux := http.NewServeMux()
+			mux.Handle("/metrics", promhttp.Handler())
+
+			server := &http.Server{
+				Addr:    fmt.Sprintf(":%d", conf.MetricsPort),
+				Handler: mux,
+			}
+
+			go func() {
+				<-ctx.Done()
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				server.Shutdown(shutdownCtx)
+			}()
+
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("metrics server error", "error", err)
+			}
+
+			slog.Info("exiting goroutine", "type", "metrics-server")
 		})
 
 		wg.Wait()

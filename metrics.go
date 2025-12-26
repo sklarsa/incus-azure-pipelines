@@ -60,14 +60,14 @@ func (c *agentUptimeCollector) Collect(ch chan<- prometheus.Metric) {
 
 var agentsCreatedMetric = promauto.NewCounter(
 	prometheus.CounterOpts{
-		Name: "iap_agents_created",
+		Name: "iap_agents_created_success",
 		Help: "Count of the number of agents created by the orchestrator",
 	},
 )
 
 var agentsCreatedErrorMetric = promauto.NewCounter(
 	prometheus.CounterOpts{
-		Name: "iap_agents_created_errors",
+		Name: "iap_agents_created_error",
 		Help: "Count of the number of errors that have occurred while creating an agent",
 	},
 )

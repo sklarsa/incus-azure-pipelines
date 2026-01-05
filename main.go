@@ -90,10 +90,19 @@ func main() {
 				return
 			}
 
-			project := context["project"].(string)
-			instance := context["instance"].(string)
+			project, ok := context["project"].(string)
+			if !ok {
+				slog.Error("unexpected event format, context.project is not a string", "data", e)
+				return
+			}
 
 			if project != conf.ProjectName {
+				return
+			}
+
+			instance, ok := context["instance"].(string)
+			if !ok {
+				slog.Error("unexpected event format, context.instance is not a string", "data", e)
 				return
 			}
 

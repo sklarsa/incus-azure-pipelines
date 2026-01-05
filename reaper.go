@@ -3,19 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
-	"time"
 
 	incus "github.com/lxc/incus/v6/client"
 	"github.com/lxc/incus/v6/shared/api"
 )
 
-func runReaper(ctx context.Context, c incus.InstanceServer, runFrequency time.Duration) {
+var instancesToReap = make(chan int)
 
-}
+func checkIfInstanceIsStale(ctx context.Context, c incus.InstanceServer, idx int) (bool, error) {
 
-func (r reaper) check(ctx context.Context, idx int) error {
-
-	op, err := r.c.ExecInstance(
+	op, err := c.ExecInstance(
 		agentName(idx),
 		api.InstanceExecPost{
 			Command: []string{
@@ -29,16 +26,16 @@ func (r reaper) check(ctx context.Context, idx int) error {
 		&incus.InstanceExecArgs{},
 	)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	if err := op.WaitContext(ctx); err != nil {
-		return err
+		return false, err
 	}
 
 	meta := op.Get().Metadata
 	if meta == nil {
-		return fmt.Errorf("unable to obtain return code. metadata is nil")
+		return false, fmt.Errorf("unable to obtain return code. metadata is nil")
 	}
 
 	returnCode, ok := meta["return"].(float64)
@@ -46,10 +43,10 @@ func (r reaper) check(ctx context.Context, idx int) error {
 		exitCode := int(returnCode)
 		// if command succeeds, run_agent is still running and no reaping required
 		if exitCode == 0 {
-			return nil
+			return false, nil
 		}
 	} else {
-		return fmt.Errorf("unable to obtain return code. return code not found in metadata")
+		return false, fmt.Errorf("unable to obtain return code. return code not found in metadata")
 	}
 
 	// If command returns a non-0, run_agent is not running (or ps has failed)

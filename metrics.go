@@ -71,3 +71,17 @@ var agentsCreatedErrorMetric = promauto.NewCounter(
 		Help: "Count of the number of errors that have occurred while creating an agent",
 	},
 )
+
+var agentsReapedMetric = promauto.NewCounter(
+	prometheus.CounterOpts{
+		Name: "iap_agents_reaped",
+		Help: "Count of stale agents reaped",
+	},
+)
+
+var agentsReapedErrorMetric = promauto.NewCounter(
+	prometheus.CounterOpts{
+		Name: "iap_agents_reaped_error",
+		Help: "Count of errors while reaping stale agents",
+	},
+)

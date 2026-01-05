@@ -235,6 +235,10 @@ func main() {
 		})
 
 		wg.Go(func() {
+			runReaper(ctx, c, conf)
+		})
+
+		wg.Go(func() {
 			agentUptime := newAgentUptimeCollector(c)
 			prometheus.MustRegister(agentUptime)
 

@@ -37,15 +37,20 @@ var (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
 
+func run() error {
 	var (
-		run        bool
+		runFlag    bool
 		provision  bool
 		logs       int
 		configPath string
 	)
 
-	flag.BoolVar(&run, "run", false, "run the orchestrator daemon")
+	flag.BoolVar(&runFlag, "run", false, "run the orchestrator daemon")
 	flag.BoolVar(&provision, "provision", false, "provision the base instance and exit")
 	flag.IntVar(&logs, "logs", -1, "get agent logs by index (base 0)")
 	flag.StringVar(&configPath, "config", "./config.yaml", "path of config file")
@@ -54,23 +59,23 @@ func main() {
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		log.Fatalf("error reading config at %s: %s", configPath, err.Error())
+		return fmt.Errorf("error reading config at %s: %w", configPath, err)
 	}
 
 	conf, err := parseConfig(data)
 	if err != nil {
-		log.Fatalf("error parsing config at %s: %s", configPath, err.Error())
+		return fmt.Errorf("error parsing config at %s: %w", configPath, err)
 	}
 
 	c, err := incus.ConnectIncusUnix("", nil)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer c.Disconnect()
 
 	listener, err := c.GetEvents()
 	if err != nil {
-		log.Fatalf("error setting up incus event listener: %s", err.Error())
+		return fmt.Errorf("error setting up incus event listener: %w", err)
 	}
 
 	h, err := listener.AddHandler(nil, func(e api.Event) {
@@ -132,7 +137,9 @@ func main() {
 	go func() {
 		<-sigCh
 
-		listener.RemoveHandler(h)
+		if err := listener.RemoveHandler(h); err != nil {
+			slog.Error("error removing event handler", "err", err)
+		}
 		listener.Disconnect()
 
 		cancel()
@@ -143,14 +150,10 @@ func main() {
 
 	if provision {
 		fmt.Printf("provisioning base instance %q\n", conf.BaseImage)
-		if err := provisionBaseInstance(ctx, c, conf); err != nil {
-			log.Fatal(err)
-		}
-		return
+		return provisionBaseInstance(ctx, c, conf)
 	}
 
 	if logs > -1 {
-
 		op, err := c.ExecInstance(
 			agentName(logs),
 			api.InstanceExecPost{
@@ -161,19 +164,13 @@ func main() {
 				Stdout: os.Stdout,
 			},
 		)
-
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
-
-		if err = op.Wait(); err != nil {
-			log.Fatal(err)
-		}
-		return
+		return op.Wait()
 	}
 
-	if run {
-
+	if runFlag {
 		wg := &sync.WaitGroup{}
 
 		wg.Go(func() {
@@ -230,7 +227,9 @@ func main() {
 
 		wg.Go(func() {
 			slog.Info("starting goroutine", "type", "event-listener")
-			listener.Wait()
+			if err := listener.Wait(); err != nil {
+				slog.Error("event listener error", "err", err)
+			}
 			slog.Info("exiting goroutine", "type", "event-listener")
 		})
 
@@ -259,7 +258,9 @@ func main() {
 				<-ctx.Done()
 				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				server.Shutdown(shutdownCtx)
+				if err := server.Shutdown(shutdownCtx); err != nil {
+					slog.Error("error shutting down metrics server", "err", err)
+				}
 			}()
 
 			slog.Info("binding metrics-server", "port", conf.MetricsPort)
@@ -271,10 +272,9 @@ func main() {
 		})
 
 		wg.Wait()
-		return
+		return nil
 	}
 
 	flag.PrintDefaults()
-	os.Exit(-1)
-
+	return fmt.Errorf("no command specified")
 }

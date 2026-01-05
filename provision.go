@@ -221,9 +221,13 @@ su - "${AGENT_USER}" -c "
 			fmt.Fprint(os.Stderr, "\n")
 		}),
 	)
-	defer p.Close()
+	defer func() {
+		if err := p.Close(); err != nil {
+			slog.Error("error closing progress bar", "err", err)
+		}
+	}()
 
-	_, err = op.AddHandler(func(o api.Operation) {
+	_, _ = op.AddHandler(func(o api.Operation) {
 		if o.Metadata == nil {
 			return
 		}
@@ -306,7 +310,11 @@ func getAgentDownloadURL() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch latest release: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Error("error closing response body", "err", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)

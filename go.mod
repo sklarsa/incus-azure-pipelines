@@ -5,7 +5,9 @@ go 1.25.4
 require (
 	github.com/go-playground/validator/v10 v10.28.0
 	github.com/goccy/go-yaml v1.19.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/lxc/incus/v6 v6.19.1
+	github.com/pkg/sftp v1.13.10
 	github.com/prometheus/client_golang v1.23.2
 	github.com/schollz/progressbar/v3 v3.18.0
 	github.com/stretchr/testify v1.11.1
@@ -31,7 +33,6 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/klauspost/compress v1.18.1 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/kr/fs v0.1.0 // indirect
@@ -46,7 +47,6 @@ require (
 	github.com/opencontainers/runtime-spec v1.3.0 // indirect
 	github.com/opencontainers/umoci v0.6.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/pkg/sftp v1.13.10 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.67.4 // indirect
@@ -55,6 +55,7 @@ require (
 	github.com/rootless-containers/proto/go-proto v0.0.0-20230421021042-4cd87ebadd67 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
+	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/urfave/cli v1.22.17 // indirect
 	github.com/vbatts/go-mtree v0.6.1-0.20250911112631-8307d76bc1b9 // indirect
 	github.com/zitadel/logging v0.6.2 // indirect

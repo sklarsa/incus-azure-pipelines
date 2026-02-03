@@ -7,7 +7,8 @@ vet:
 	go vet ./...
 
 test:
-	go test -v ./...
+	go test -v -coverprofile=cover.out ./...
+	go tool cover -func=cover.out
 
 mocks:
 	mockery --name=InstanceServer --structname=MockInstanceServer --srcpkg=github.com/lxc/incus/v6/client --output=. --outpkg=main --filename=mock_incus_test.go --inpackage=false

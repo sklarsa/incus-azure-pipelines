@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lxc/incus/v6/shared/api"
+	"github.com/sklarsa/incus-azure-pipelines/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -31,7 +32,7 @@ func TestReapStaleInstances_SkipsNonAgentContainers(t *testing.T) {
 	inFlight = &sync.Map{}
 	defer func() { inFlight = &sync.Map{} }()
 
-	m := NewMockInstanceServer(t)
+	m := mocks.NewMockInstanceServer(t)
 	m.On("GetInstancesFull", api.InstanceTypeContainer).Return([]api.InstanceFull{
 		{Instance: api.Instance{Name: "some-other-thing"}},
 	}, nil)
@@ -47,7 +48,7 @@ func TestReapStaleInstances_SkipsInFlightInstances(t *testing.T) {
 	inFlight.Store(0, true)
 	defer func() { inFlight = &sync.Map{} }()
 
-	m := NewMockInstanceServer(t)
+	m := mocks.NewMockInstanceServer(t)
 	m.On("GetInstancesFull", api.InstanceTypeContainer).Return([]api.InstanceFull{
 		{
 			Instance: api.Instance{
@@ -68,7 +69,7 @@ func TestReapStaleInstances_SkipsNotRunning(t *testing.T) {
 	inFlight = &sync.Map{}
 	defer func() { inFlight = &sync.Map{} }()
 
-	m := NewMockInstanceServer(t)
+	m := mocks.NewMockInstanceServer(t)
 	m.On("GetInstancesFull", api.InstanceTypeContainer).Return([]api.InstanceFull{
 		{
 			Instance: api.Instance{
@@ -89,7 +90,7 @@ func TestReapStaleInstances_SkipsYoungContainers(t *testing.T) {
 	inFlight = &sync.Map{}
 	defer func() { inFlight = &sync.Map{} }()
 
-	m := NewMockInstanceServer(t)
+	m := mocks.NewMockInstanceServer(t)
 	m.On("GetInstancesFull", api.InstanceTypeContainer).Return([]api.InstanceFull{
 		{
 			Instance: api.Instance{
@@ -110,7 +111,7 @@ func TestReapStaleInstances_ReapsWhenAgentNotRunning(t *testing.T) {
 	inFlight = &sync.Map{}
 	defer func() { inFlight = &sync.Map{} }()
 
-	m := NewMockInstanceServer(t)
+	m := mocks.NewMockInstanceServer(t)
 	m.On("GetInstancesFull", api.InstanceTypeContainer).Return([]api.InstanceFull{
 		{
 			Instance: api.Instance{
@@ -122,7 +123,7 @@ func TestReapStaleInstances_ReapsWhenAgentNotRunning(t *testing.T) {
 	}, nil)
 
 	// pgrep returns exit code 1 (not found)
-	execOp := NewMockOperation(t)
+	execOp := mocks.NewMockOperation(t)
 	execOp.On("WaitContext", mock.Anything).Return(nil)
 	execOp.On("Get").Return(api.Operation{
 		Metadata: map[string]any{"return": float64(1)},
@@ -130,7 +131,7 @@ func TestReapStaleInstances_ReapsWhenAgentNotRunning(t *testing.T) {
 	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(execOp, nil)
 
 	// Expect stop call
-	stopOp := NewMockOperation(t)
+	stopOp := mocks.NewMockOperation(t)
 	stopOp.On("WaitContext", mock.Anything).Return(nil)
 	m.On("UpdateInstanceState", "azp-agent-0", mock.MatchedBy(func(s api.InstanceStatePut) bool {
 		return s.Action == "stop" && s.Force == true
@@ -145,7 +146,7 @@ func TestReapStaleInstances_SkipsWhenAgentRunning(t *testing.T) {
 	inFlight = &sync.Map{}
 	defer func() { inFlight = &sync.Map{} }()
 
-	m := NewMockInstanceServer(t)
+	m := mocks.NewMockInstanceServer(t)
 	m.On("GetInstancesFull", api.InstanceTypeContainer).Return([]api.InstanceFull{
 		{
 			Instance: api.Instance{
@@ -157,7 +158,7 @@ func TestReapStaleInstances_SkipsWhenAgentRunning(t *testing.T) {
 	}, nil)
 
 	// pgrep returns exit code 0 (found)
-	execOp := NewMockOperation(t)
+	execOp := mocks.NewMockOperation(t)
 	execOp.On("WaitContext", mock.Anything).Return(nil)
 	execOp.On("Get").Return(api.Operation{
 		Metadata: map[string]any{"return": float64(0)},
@@ -178,7 +179,7 @@ func TestReapStaleInstances_GetInstancesFullError(t *testing.T) {
 	slog.SetDefault(slog.New(handler))
 	defer slog.SetDefault(orig)
 
-	m := NewMockInstanceServer(t)
+	m := mocks.NewMockInstanceServer(t)
 	m.On("GetInstancesFull", api.InstanceTypeContainer).Return(nil, fmt.Errorf("connection refused"))
 
 	reapStaleInstances(context.Background(), m, testConfig())
@@ -189,9 +190,9 @@ func TestReapStaleInstances_GetInstancesFullError(t *testing.T) {
 }
 
 func TestReapInstance(t *testing.T) {
-	m := NewMockInstanceServer(t)
+	m := mocks.NewMockInstanceServer(t)
 
-	op := NewMockOperation(t)
+	op := mocks.NewMockOperation(t)
 	op.On("WaitContext", mock.Anything).Return(nil)
 	m.On("UpdateInstanceState", "azp-agent-5", mock.MatchedBy(func(s api.InstanceStatePut) bool {
 		return s.Action == "stop" && s.Force == true && s.Timeout == 30
@@ -202,7 +203,7 @@ func TestReapInstance(t *testing.T) {
 }
 
 func TestReapInstance_NotFound(t *testing.T) {
-	m := NewMockInstanceServer(t)
+	m := mocks.NewMockInstanceServer(t)
 
 	m.On("UpdateInstanceState", "azp-agent-5", mock.Anything, "").
 		Return(nil, api.StatusErrorf(http.StatusNotFound, "not found"))
@@ -212,9 +213,9 @@ func TestReapInstance_NotFound(t *testing.T) {
 }
 
 func TestIsAgentProcessRunning_Running(t *testing.T) {
-	m := NewMockInstanceServer(t)
+	m := mocks.NewMockInstanceServer(t)
 
-	op := NewMockOperation(t)
+	op := mocks.NewMockOperation(t)
 	op.On("WaitContext", mock.Anything).Return(nil)
 	op.On("Get").Return(api.Operation{
 		Metadata: map[string]any{"return": float64(0)},
@@ -227,9 +228,9 @@ func TestIsAgentProcessRunning_Running(t *testing.T) {
 }
 
 func TestIsAgentProcessRunning_NotRunning(t *testing.T) {
-	m := NewMockInstanceServer(t)
+	m := mocks.NewMockInstanceServer(t)
 
-	op := NewMockOperation(t)
+	op := mocks.NewMockOperation(t)
 	op.On("WaitContext", mock.Anything).Return(nil)
 	op.On("Get").Return(api.Operation{
 		Metadata: map[string]any{"return": float64(1)},
@@ -242,7 +243,7 @@ func TestIsAgentProcessRunning_NotRunning(t *testing.T) {
 }
 
 func TestIsAgentProcessRunning_ExecError(t *testing.T) {
-	m := NewMockInstanceServer(t)
+	m := mocks.NewMockInstanceServer(t)
 
 	m.On("ExecInstance", "azp-agent-3", mock.Anything, mock.Anything).
 		Return(nil, fmt.Errorf("container not running"))
@@ -252,9 +253,9 @@ func TestIsAgentProcessRunning_ExecError(t *testing.T) {
 }
 
 func TestIsAgentProcessRunning_NilMetadata(t *testing.T) {
-	m := NewMockInstanceServer(t)
+	m := mocks.NewMockInstanceServer(t)
 
-	op := NewMockOperation(t)
+	op := mocks.NewMockOperation(t)
 	op.On("WaitContext", mock.Anything).Return(nil)
 	op.On("Get").Return(api.Operation{
 		Metadata: nil,

@@ -413,3 +413,7 @@ func (p *Pool) AgentName(idx int) string {
 func (p *Pool) Name() string {
 	return p.conf.NamePrefix
 }
+
+func (p *Pool) Project() string {
+	return p.conf.ProjectName
+}

@@ -9,20 +9,16 @@ import (
 	"github.com/sklarsa/incus-azure-pipelines/pool"
 )
 
-const (
-	defaultReconcilePeriod = 5 * time.Second
-)
-
 type Config struct {
-	ReaperInterval    time.Duration `json:"reaperInterval"`
-	ReconcileInterval time.Duration `json:"reconcileInterval"`
+	ReaperInterval    time.Duration `json:"reaperInterval" validate:"min=10s"`
+	ReconcileInterval time.Duration `json:"reconcileInterval" validate:"min=5s"`
 }
 
 func Run(ctx context.Context, p *pool.Pool, conf Config) {
 	wg := &sync.WaitGroup{}
 	agentsToCreate := make(chan int)
 
-	logger := slog.With("pool", p.Name())
+	logger := slog.With("pool", p.Name(), "project", p.Project())
 
 	wg.Go(func() {
 		logger.Info("starting goroutine", "type", "agent-builder")
@@ -53,9 +49,6 @@ func Run(ctx context.Context, p *pool.Pool, conf Config) {
 
 		// Then wait for next reconcile trigger until
 		// the agentsToCreate chan is closed
-		if conf.ReconcileInterval == 0 {
-			conf.ReconcileInterval = defaultReconcilePeriod
-		}
 		ticker := time.NewTicker(conf.ReconcileInterval)
 		defer ticker.Stop()
 

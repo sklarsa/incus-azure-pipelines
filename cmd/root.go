@@ -18,10 +18,12 @@ var (
 	configPath string
 	conf       cliConfig
 	c          incus.InstanceServer
+	logLevel   string
 )
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "./config.yaml", "path to config file")
+	rootCmd.PersistentFlags().StringVarP(&logLevel, "log-level", "l", "debug", "log level (debug, info, warn, error)")
 }
 
 var rootCmd = &cobra.Command{
@@ -30,6 +32,16 @@ var rootCmd = &cobra.Command{
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Init logging
+		var level slog.Level
+		if err := level.UnmarshalText([]byte(logLevel)); err != nil {
+			fmt.Fprintf(os.Stderr, "invalid log level %q: %v\n", logLevel, err)
+			os.Exit(1)
+		}
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: level,
+		})))
+
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		go func() {

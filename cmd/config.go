@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"time"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/goccy/go-yaml"
 	"github.com/sklarsa/incus-azure-pipelines/daemon"
@@ -17,6 +19,10 @@ type cliConfig struct {
 func parseConfig(data []byte) (cliConfig, error) {
 	config := cliConfig{
 		MetricsPort: 8811,
+		Daemon: daemon.Config{
+			ReconcileInterval: 5 * time.Second,
+			ReaperInterval:    30 * time.Second,
+		},
 	}
 
 	if err := yaml.Unmarshal(data, &config); err != nil {

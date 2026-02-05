@@ -10,8 +10,8 @@ import (
 )
 
 type Config struct {
-	ReaperInterval    time.Duration `json:"reaperInterval" validate:"min=10s"`
-	ReconcileInterval time.Duration `json:"reconcileInterval" validate:"min=5s"`
+	ReaperInterval    time.Duration `json:"reaperInterval"`
+	ReconcileInterval time.Duration `json:"reconcileInterval"`
 }
 
 func Run(ctx context.Context, p *pool.Pool, conf Config) {

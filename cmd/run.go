@@ -37,10 +37,6 @@ var runCmd = &cobra.Command{
 
 		wg.Go(func() {
 			slog.Info("starting goroutine", "type", "metrics-server")
-			if conf.MetricsPort == 0 {
-				// todo: handle defaults better
-				conf.MetricsPort = 8811
-			}
 
 			mux := http.NewServeMux()
 			mux.Handle("/metrics", promhttp.Handler())

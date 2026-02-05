@@ -14,15 +14,15 @@ const (
 )
 
 type Config struct {
-	ReaperInterval    time.Duration
-	ReconcileInterval time.Duration
+	ReaperInterval    time.Duration `json:"reaperInterval"`
+	ReconcileInterval time.Duration `json:"reconcileInterval"`
 }
 
 func Run(ctx context.Context, p *pool.Pool, conf Config) {
 	wg := &sync.WaitGroup{}
 	agentsToCreate := make(chan int)
 
-	logger := slog.With("pool", p.Name)
+	logger := slog.With("pool", p.Name())
 
 	wg.Go(func() {
 		logger.Info("starting goroutine", "type", "agent-builder")

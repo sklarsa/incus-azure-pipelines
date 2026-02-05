@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -46,18 +47,17 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("error parsing config at %s: %w", configPath, err)
 		}
 
-		c, err := incus.ConnectIncusUnix("", nil)
+		c, err = incus.ConnectIncusUnix("", nil)
 		if err != nil {
 			return err
 		}
-		defer c.Disconnect()
-
-		if conf.ProjectName != "" {
-			c.UseProject(conf.ProjectName)
-		}
+		slog.Info("connected to local incus daemon")
 
 		return err
 
+	},
+	PersistentPostRun: func(cmd *cobra.Command, args []string) {
+		c.Disconnect()
 	},
 }
 

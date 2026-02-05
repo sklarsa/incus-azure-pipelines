@@ -3,6 +3,8 @@ package pool
 import "time"
 
 type Config struct {
+	// ProjectName is the name of the incus project used for Azure Pipelines Agent runners
+	ProjectName string `json:"projectName" validate:"required"`
 	// AgentCount is the number of agents to run on this node
 	AgentCount int `json:"agentCount" validate:"min=1,max=64"`
 	// MaxCores specifies the max number of cores that each agent can use. Used to set limits.cpu.allowance
@@ -13,10 +15,10 @@ type Config struct {
 	// TmpfsSizeInGb specifies the maximum size of the tmpfs directory mounted to /tmp in each agent container
 	TmpfsSizeInGb int `json:"tmpfsSizeInGb" validate:"min=0"`
 	// Azure specific settings
-	Azure              AzureConfig `json:"azure" validate:"required"`
-	NamePrefix         string
-	Image              string
-	StartupGracePeriod time.Duration
+	Azure              AzureConfig   `json:"azure" validate:"required"`
+	NamePrefix         string        `json:"namePrefix" validate:"required,hostname"`
+	Image              string        `json:"image" validate:"required"`
+	StartupGracePeriod time.Duration `json:"startupGracePeriod"`
 }
 
 type AzureConfig struct {

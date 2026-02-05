@@ -8,17 +8,16 @@ import (
 )
 
 type cliConfig struct {
-
-	// ProjectName is the name of the incus project used for Azure Pipelines Agent runners
-	ProjectName string `json:"projectName" validate:"required"`
-	Pools       []pool.Config
+	Pools []pool.Config `json:"pools" validate:"dive"`
 	// MetricsPort is the port number that servers prometheus metrics
-	MetricsPort int `json:"metricsPort" validate:"min=0"`
-	Daemon      daemon.Config
+	MetricsPort int           `json:"metricsPort" validate:"min=0"`
+	Daemon      daemon.Config `json:"daemon"`
 }
 
 func parseConfig(data []byte) (cliConfig, error) {
-	config := cliConfig{}
+	config := cliConfig{
+		MetricsPort: 8811,
+	}
 
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return config, err

@@ -3,7 +3,6 @@ package pool
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"sync"
 
 	incus "github.com/lxc/incus/v6/client"
@@ -34,7 +33,7 @@ func NewListener(p *Pool, agentsToCreate chan<- int) (*Listener, error) {
 
 		meta := map[string]any{}
 		if err := json.Unmarshal(e.Metadata, &meta); err != nil {
-			slog.Error("error unmarshaling event", "err", err, "meta", e.Metadata)
+			l.p.logger.Error("error unmarshaling event", "err", err, "meta", e.Metadata)
 			return
 		}
 
@@ -43,19 +42,19 @@ func NewListener(p *Pool, agentsToCreate chan<- int) (*Listener, error) {
 
 			context, ok := meta["context"].(map[string]any)
 			if !ok {
-				slog.Warn("unexpected event format, no 'context' map found", "data", e)
+				l.p.logger.Warn("unexpected event format, no 'context' map found", "data", e)
 				return
 			}
 
 			instance, ok := context["instance"].(string)
 			if !ok {
-				slog.Error("unexpected event format, context.instance is not a string", "data", e)
+				l.p.logger.Error("unexpected event format, context.instance is not a string", "data", e)
 				return
 			}
 
 			idx := p.AgentIndex(instance)
 			if idx >= 0 {
-				slog.Info("container deleted", "name", instance)
+				l.p.logger.Info("container deleted", "name", instance)
 				agentsToCreate <- idx
 			}
 		}
@@ -74,7 +73,7 @@ func (l *Listener) Close() {
 
 		if l.h != nil {
 			if err := l.l.RemoveHandler(l.h); err != nil {
-				slog.Error("error removing event handler", "err", err)
+				l.p.logger.Error("error removing event handler", "err", err)
 			}
 		}
 	})

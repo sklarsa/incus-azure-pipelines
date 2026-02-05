@@ -25,13 +25,18 @@ type Pool struct {
 	conf     Config
 	agentRe  *regexp.Regexp
 	inFlight *sync.Map
+	logger   *slog.Logger
 }
 
 func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
+	if conf.ProjectName != "" {
+		c = c.UseProject(conf.ProjectName)
+	}
 	p := &Pool{
 		c:        c,
 		conf:     conf,
 		inFlight: &sync.Map{},
+		logger:   slog.With("pool", conf.NamePrefix, "project", conf.ProjectName),
 	}
 
 	var err error
@@ -56,10 +61,9 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 	// todo: check for base image existence
 
 	if _, exists := p.inFlight.LoadOrStore(idx, true); exists {
-		slog.Warn("skipping agent creation",
+		p.logger.Warn("skipping agent creation",
 			"reason", "in-flight",
 			"idx", idx,
-			"pool", p.conf.NamePrefix,
 		)
 		return nil
 	}
@@ -254,7 +258,7 @@ func (p *Pool) Reap(ctx context.Context) error {
 
 		// Skip if container is not running
 		if instance.State == nil {
-			slog.Debug("reaper: skipping instance",
+			p.logger.Debug("reaper: skipping instance",
 				"reason", "instance state unknown",
 				"idx", idx,
 			)
@@ -263,7 +267,7 @@ func (p *Pool) Reap(ctx context.Context) error {
 
 		status := instance.State.Status
 		if status != "Running" {
-			slog.Debug("reaper: skipping instance",
+			p.logger.Debug("reaper: skipping instance",
 				"reason", fmt.Sprintf("container status: %s", status),
 				"idx", idx,
 			)
@@ -273,7 +277,7 @@ func (p *Pool) Reap(ctx context.Context) error {
 		// Skip if container is too young
 		age := now.Sub(instance.CreatedAt)
 		if age < p.conf.StartupGracePeriod {
-			slog.Debug("reaper: skipping instance",
+			p.logger.Debug("reaper: skipping instance",
 				"reason", "age < grace period",
 				"age", age,
 				"idx", idx,
@@ -284,12 +288,12 @@ func (p *Pool) Reap(ctx context.Context) error {
 		// Check if agent process is running
 		running, err := p.isAgentProcessRunning(ctx, idx)
 		if err != nil {
-			slog.Warn("reaper: health check failed", "idx", idx, "err", err)
+			p.logger.Warn("reaper: health check failed", "idx", idx, "err", err)
 			continue
 		}
 
 		if running {
-			slog.Debug("reaper: skipping instance",
+			p.logger.Debug("reaper: skipping instance",
 				"reason", "agent process is running",
 				"age", age,
 				"idx", idx,
@@ -298,7 +302,7 @@ func (p *Pool) Reap(ctx context.Context) error {
 		}
 
 		if _, exists := p.inFlight.LoadOrStore(idx, true); exists {
-			slog.Debug("reaper: skipping instance",
+			p.logger.Debug("reaper: skipping instance",
 				"reason", "in-flight",
 				"idx", idx,
 			)
@@ -306,13 +310,13 @@ func (p *Pool) Reap(ctx context.Context) error {
 		}
 
 		// Stale - reap it
-		slog.Info("reaper: reaping stale instance", "idx", idx, "age", age)
+		p.logger.Info("reaper: reaping stale instance", "idx", idx, "age", age)
 
 		err = p.reapInstance(ctx, idx)
 		p.inFlight.Delete(idx)
 
 		if err != nil {
-			slog.Error("reaper: failed to reap", "idx", idx, "err", err)
+			p.logger.Error("reaper: failed to reap", "idx", idx, "err", err)
 			agentsReapedErrorMetric.WithLabelValues(p.conf.NamePrefix).Inc()
 		} else {
 			agentsReapedMetric.WithLabelValues(p.conf.NamePrefix).Inc()

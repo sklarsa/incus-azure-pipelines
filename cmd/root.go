@@ -69,7 +69,10 @@ var rootCmd = &cobra.Command{
 
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
-		c.Disconnect()
+		if c != nil {
+			c.Disconnect()
+		}
+
 	},
 }
 

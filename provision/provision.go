@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	incus "github.com/lxc/incus/v6/client"
 	"github.com/lxc/incus/v6/shared/api"
@@ -326,7 +327,8 @@ func getAgentDownloadURL() (string, error) {
 	}
 
 	// Get latest version from GitHub
-	resp, err := http.Get("https://api.github.com/repos/microsoft/azure-pipelines-agent/releases/latest")
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get("https://api.github.com/repos/microsoft/azure-pipelines-agent/releases/latest")
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch latest release: %w", err)
 	}

@@ -17,8 +17,8 @@ func init() {
 	provisionCmd.Flags().StringArrayVarP(&provisionConf.Scripts, "scripts", "s", []string{}, "paths to provisioning scripts")
 	provisionCmd.Flags().StringVarP(&provisionConf.ProjectName, "project", "p", "", "name of incus project to build the image in")
 
-	provisionCmd.MarkFlagRequired("base")
-	provisionCmd.MarkFlagRequired("target")
+	_ = provisionCmd.MarkFlagRequired("base")
+	_ = provisionCmd.MarkFlagRequired("target")
 }
 
 var provisionCmd = &cobra.Command{

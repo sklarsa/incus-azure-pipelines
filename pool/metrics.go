@@ -1,23 +1,22 @@
-package main
+package pool
 
 import (
 	"log/slog"
+	"strconv"
 	"time"
 
-	incus "github.com/lxc/incus/v6/client"
-	"github.com/lxc/incus/v6/shared/api"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 type agentUptimeCollector struct {
-	c    incus.InstanceServer
+	p    *Pool
 	desc *prometheus.Desc
 }
 
-func newAgentUptimeCollector(c incus.InstanceServer) *agentUptimeCollector {
+func newAgentUptimeCollector(p *Pool) *agentUptimeCollector {
 	return &agentUptimeCollector{
-		c: c,
+		p: p,
 		desc: prometheus.NewDesc(
 			"iap_agent_uptime",
 			"Time (in seconds) an agent is up and running",
@@ -32,56 +31,62 @@ func (c *agentUptimeCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (c *agentUptimeCollector) Collect(ch chan<- prometheus.Metric) {
-	instances, err := c.c.GetInstances(api.InstanceTypeContainer)
+	instances, err := c.p.ListAgents()
 	if err != nil {
 		slog.Error("error obtaining instance list from incus", "err", err)
 		return
 	}
 
 	for _, i := range instances {
-		matches := agentRe.FindStringSubmatch(i.Name)
-		if matches == nil {
-			continue
-		}
+
+		idx := c.p.AgentIndex(i.Name)
 
 		val := time.Since(i.CreatedAt).Seconds()
 
-		idx := matches[1]
-
-		ch <- prometheus.MustNewConstMetric(
+		m, err := prometheus.NewConstMetric(
 			c.desc,
 			prometheus.GaugeValue,
 			val,
-			idx,
+			strconv.Itoa(idx),
 		)
+
+		if err != nil {
+			slog.Error("error producing agent uptime metric", "err", err)
+		}
+
+		ch <- m
 
 	}
 }
 
-var agentsCreatedMetric = promauto.NewCounter(
+var agentsCreatedMetric = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "iap_agents_created_success",
 		Help: "Count of the number of agents created by the orchestrator",
 	},
+	[]string{"pool"},
 )
 
-var agentsCreatedErrorMetric = promauto.NewCounter(
+var agentsCreatedErrorMetric = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "iap_agents_created_error",
 		Help: "Count of the number of errors that have occurred while creating an agent",
 	},
+	[]string{"pool"},
 )
 
-var agentsReapedMetric = promauto.NewCounter(
+var agentsReapedMetric = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "iap_agents_reaped",
 		Help: "Count of stale agents reaped",
 	},
+	[]string{"pool"},
 )
 
-var agentsReapedErrorMetric = promauto.NewCounter(
+var agentsReapedErrorMetric = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "iap_agents_reaped_error",
 		Help: "Count of errors while reaping stale agents",
 	},
+	[]string{"pool"},
 )

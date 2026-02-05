@@ -1,4 +1,4 @@
-package agent
+package pool
 
 import (
 	"context"
@@ -17,6 +17,7 @@ func testConfig() Config {
 		ProjectName: "test",
 		NamePrefix:  "azp-agent",
 		Image:       "test-image",
+		AgentCount:  3,
 		Azure: AzureConfig{
 			PAT:  "test-token",
 			Pool: "default",
@@ -25,27 +26,27 @@ func testConfig() Config {
 	}
 }
 
-func TestNewRepository(t *testing.T) {
+func TestNewPool(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	conf := testConfig()
 
-	repo, err := NewRepository(m, conf)
+	pool, err := NewPool(m, conf)
 	require.NoError(t, err)
-	require.NotNil(t, repo)
-	require.NotNil(t, repo.agentRe)
+	require.NotNil(t, pool)
+	require.NotNil(t, pool.agentRe)
 }
 
-func TestNewRepository_InvalidRegexp(t *testing.T) {
+func TestNewPool_InvalidRegexp(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	conf := testConfig()
 	conf.NamePrefix = "[invalid"
 
-	_, err := NewRepository(m, conf)
+	_, err := NewPool(m, conf)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unable to construct agent regexp")
 }
 
-func TestRepository_List(t *testing.T) {
+func TestPool_List(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	m.On("GetInstances", api.InstanceTypeContainer).Return([]api.Instance{
 		{Name: "azp-agent-0"},
@@ -53,37 +54,37 @@ func TestRepository_List(t *testing.T) {
 		{Name: "other-container"},
 	}, nil)
 
-	repo, err := NewRepository(m, testConfig())
+	pool, err := NewPool(m, testConfig())
 	require.NoError(t, err)
 
-	agents, err := repo.List()
+	agents, err := pool.ListAgents()
 	require.NoError(t, err)
 	assert.Len(t, agents, 2)
 	assert.Equal(t, "azp-agent-0", agents[0].Name)
 	assert.Equal(t, "azp-agent-1", agents[1].Name)
 }
 
-func TestRepository_List_Error(t *testing.T) {
+func TestPool_List_Error(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	m.On("GetInstances", api.InstanceTypeContainer).Return(nil, fmt.Errorf("connection refused"))
 
-	repo, err := NewRepository(m, testConfig())
+	pool, err := NewPool(m, testConfig())
 	require.NoError(t, err)
 
-	_, err = repo.List()
+	_, err = pool.ListAgents()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "connection refused")
 }
 
-func TestRepository_Reconcile_AllMissing(t *testing.T) {
+func TestPool_Reconcile_AllMissing(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	m.On("GetInstances", api.InstanceTypeContainer).Return([]api.Instance{}, nil)
 
-	repo, err := NewRepository(m, testConfig())
+	pool, err := NewPool(m, testConfig())
 	require.NoError(t, err)
 
 	ch := make(chan int, 64)
-	err = repo.Reconcile(3, ch)
+	err = pool.Reconcile(3, ch)
 	require.NoError(t, err)
 	close(ch)
 
@@ -95,7 +96,7 @@ func TestRepository_Reconcile_AllMissing(t *testing.T) {
 	assert.ElementsMatch(t, []int{0, 1, 2}, created)
 }
 
-func TestRepository_Reconcile_AllPresent(t *testing.T) {
+func TestPool_Reconcile_AllPresent(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	m.On("GetInstances", api.InstanceTypeContainer).Return([]api.Instance{
 		{Name: "azp-agent-0"},
@@ -103,29 +104,29 @@ func TestRepository_Reconcile_AllPresent(t *testing.T) {
 		{Name: "azp-agent-2"},
 	}, nil)
 
-	repo, err := NewRepository(m, testConfig())
+	pool, err := NewPool(m, testConfig())
 	require.NoError(t, err)
 
 	ch := make(chan int, 64)
-	err = repo.Reconcile(3, ch)
+	err = pool.Reconcile(3, ch)
 	require.NoError(t, err)
 	close(ch)
 
 	assert.Empty(t, ch)
 }
 
-func TestRepository_Reconcile_PartiallyPresent(t *testing.T) {
+func TestPool_Reconcile_PartiallyPresent(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	m.On("GetInstances", api.InstanceTypeContainer).Return([]api.Instance{
 		{Name: "azp-agent-0"},
 		{Name: "azp-agent-2"},
 	}, nil)
 
-	repo, err := NewRepository(m, testConfig())
+	pool, err := NewPool(m, testConfig())
 	require.NoError(t, err)
 
 	ch := make(chan int, 64)
-	err = repo.Reconcile(3, ch)
+	err = pool.Reconcile(3, ch)
 	require.NoError(t, err)
 	close(ch)
 
@@ -137,20 +138,20 @@ func TestRepository_Reconcile_PartiallyPresent(t *testing.T) {
 	assert.Equal(t, []int{1}, created)
 }
 
-func TestRepository_Reconcile_Error(t *testing.T) {
+func TestPool_Reconcile_Error(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	m.On("GetInstances", api.InstanceTypeContainer).Return(nil, fmt.Errorf("connection refused"))
 
-	repo, err := NewRepository(m, testConfig())
+	pool, err := NewPool(m, testConfig())
 	require.NoError(t, err)
 
 	ch := make(chan int, 64)
-	err = repo.Reconcile(3, ch)
+	err = pool.Reconcile(3, ch)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "connection refused")
 }
 
-func TestRepository_Create(t *testing.T) {
+func TestPool_Create(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	conf := testConfig()
 	conf.TmpfsSizeInGb = 12
@@ -174,28 +175,28 @@ func TestRepository_Create(t *testing.T) {
 	execOp.On("WaitContext", mock.Anything).Return(nil)
 	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(execOp, nil)
 
-	repo, err := NewRepository(m, conf)
+	pool, err := NewPool(m, conf)
 	require.NoError(t, err)
 
-	err = repo.Create(context.Background(), 0)
+	err = pool.CreateAgent(context.Background(), 0)
 	require.NoError(t, err)
 }
 
-func TestRepository_Create_Error(t *testing.T) {
+func TestPool_Create_Error(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	conf := testConfig()
 
 	m.On("CreateInstance", mock.Anything).Return(nil, fmt.Errorf("disk full"))
 
-	repo, err := NewRepository(m, conf)
+	pool, err := NewPool(m, conf)
 	require.NoError(t, err)
 
-	err = repo.Create(context.Background(), 0)
+	err = pool.CreateAgent(context.Background(), 0)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "disk full")
 }
 
-func TestRepository_Create_NoCpuLimitWhenZero(t *testing.T) {
+func TestPool_Create_NoCpuLimitWhenZero(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	conf := testConfig()
 	conf.MaxCores = 0
@@ -216,19 +217,48 @@ func TestRepository_Create_NoCpuLimitWhenZero(t *testing.T) {
 	execOp.On("WaitContext", mock.Anything).Return(nil)
 	m.On("ExecInstance", mock.Anything, mock.Anything, mock.Anything).Return(execOp, nil)
 
-	repo, err := NewRepository(m, conf)
+	pool, err := NewPool(m, conf)
 	require.NoError(t, err)
 
-	err = repo.Create(context.Background(), 0)
+	err = pool.CreateAgent(context.Background(), 0)
 	require.NoError(t, err)
 }
 
-func TestAgentName(t *testing.T) {
-	conf := Config{
-		NamePrefix: "azp-agent",
-	}
-	assert.Equal(t, "azp-agent-0", agentName(conf, 0))
-	assert.Equal(t, "azp-agent-42", agentName(conf, 42))
+func TestPool_Create_ExceedsCapacity(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+	conf.AgentCount = 3
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	err = pool.CreateAgent(context.Background(), 5)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot create agent at index 5")
+}
+
+func TestPool_AgentName(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	assert.Equal(t, "azp-agent-0", pool.AgentName(0))
+	assert.Equal(t, "azp-agent-42", pool.AgentName(42))
+}
+
+func TestPool_AgentIndex(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	assert.Equal(t, 0, pool.AgentIndex("azp-agent-0"))
+	assert.Equal(t, 12, pool.AgentIndex("azp-agent-12"))
+	assert.Equal(t, -1, pool.AgentIndex("other-agent-0"))
+	assert.Equal(t, -1, pool.AgentIndex("azp-agent-abc"))
 }
 
 func TestAgentRe_Matching(t *testing.T) {
@@ -252,10 +282,10 @@ func TestAgentRe_Matching(t *testing.T) {
 			conf := Config{
 				NamePrefix: "azp-agent",
 			}
-			repo, err := NewRepository(m, conf)
+			pool, err := NewPool(m, conf)
 			require.NoError(t, err)
 
-			matches := repo.agentRe.FindStringSubmatch(tt.input)
+			matches := pool.agentRe.FindStringSubmatch(tt.input)
 			if tt.match {
 				require.NotNil(t, matches)
 				assert.Equal(t, tt.wantIdx, matches[1])

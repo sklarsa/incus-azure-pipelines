@@ -1,0 +1,399 @@
+package pool
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"math"
+	"net/http"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	incus "github.com/lxc/incus/v6/client"
+	"github.com/lxc/incus/v6/shared/api"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/sklarsa/incus-azure-pipelines/provision"
+)
+
+type Pool struct {
+	c        incus.InstanceServer
+	conf     Config
+	agentRe  *regexp.Regexp
+	inFlight *sync.Map
+}
+
+func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
+	p := &Pool{
+		c:        c,
+		conf:     conf,
+		inFlight: &sync.Map{},
+	}
+
+	var err error
+	p.agentRe, err = regexp.Compile("^" + conf.NamePrefix + `-(\d{1,2})$`)
+	if err != nil {
+		return nil, fmt.Errorf("unable to construct agent regexp from NamePrefix %q: %w", conf.NamePrefix, err)
+	}
+
+	err = prometheus.DefaultRegisterer.Register(newAgentUptimeCollector(p))
+	return p, err
+}
+
+func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
+	if idx >= p.conf.AgentCount {
+		return fmt.Errorf("cannot create agent at index %d, capacity is %d", idx, p.conf.AgentCount)
+	}
+
+	// todo: check for base image existence
+
+	if _, exists := p.inFlight.LoadOrStore(idx, true); exists {
+		slog.Warn("skipping agent creation",
+			"reason", "in-flight",
+			"idx", idx,
+			"pool", p.conf.NamePrefix,
+		)
+		return nil
+	}
+	defer p.inFlight.Delete(idx)
+
+	createErr := func() error {
+
+		req := api.InstancesPost{
+			Name: p.AgentName(idx),
+			Type: api.InstanceTypeContainer,
+			Source: api.InstanceSource{
+				Alias: p.conf.Image,
+				Type:  "image",
+			},
+			Start: true,
+			InstancePut: api.InstancePut{
+				Config: map[string]string{
+					"boot.host_shutdown_action": "force-stop",
+				},
+				Ephemeral: true,
+				Devices: map[string]map[string]string{
+					"tmpfs": {
+						"type":   "disk",
+						"source": "tmpfs:",
+						"path":   "/tmp",
+						"size":   fmt.Sprintf("%dGiB", p.conf.TmpfsSizeInGb),
+					},
+				},
+			},
+		}
+
+		if p.conf.MaxCores > 0 {
+			req.Config["limits.cpu.allowance"] = fmt.Sprintf("%d%%", p.conf.MaxCores*100)
+		}
+
+		if p.conf.MaxRamInGb > 0 {
+			req.Config["limits.memory"] = fmt.Sprintf("%dGiB", p.conf.MaxRamInGb)
+		}
+
+		op, err := p.c.CreateInstance(req)
+		if err != nil {
+			return err
+		}
+
+		if err = op.WaitContext(ctx); err != nil {
+			return err
+		}
+
+		if err = p.c.CreateInstanceFile(req.Name, "/home/agent/.token", incus.InstanceFileArgs{
+			Content:   strings.NewReader(p.conf.Azure.PAT),
+			WriteMode: "overwrite",
+			Mode:      400,
+			UID:       int64(provision.AgentUid),
+			GID:       int64(provision.AgentGid),
+		}); err != nil {
+			return err
+		}
+
+		hostname, err := os.Hostname()
+		if err != nil {
+			return err
+		}
+
+		op, err = p.c.ExecInstance(
+			req.Name,
+			api.InstanceExecPost{
+				Command: []string{
+					"setsid",
+					"--fork",
+					"/home/agent/run_agent.sh",
+					"--agent",
+					fmt.Sprintf("%s-%d", hostname, idx),
+					"--pool",
+					p.conf.Azure.Pool,
+					"--url",
+					p.conf.Azure.Url,
+				},
+				Interactive: false,
+				WaitForWS:   true,
+				User:        provision.AgentUid,
+				Group:       provision.AgentGid,
+			},
+			&incus.InstanceExecArgs{},
+		)
+
+		if err != nil {
+			return err
+		}
+
+		return op.WaitContext(ctx)
+
+	}()
+
+	if createErr == nil {
+		agentsCreatedMetric.WithLabelValues("pool", p.conf.NamePrefix).Inc()
+	} else {
+		agentsCreatedErrorMetric.WithLabelValues("pool", p.conf.NamePrefix).Inc()
+	}
+
+	return createErr
+
+}
+
+func (p *Pool) isAgent(i api.Instance) bool {
+	matches := p.agentRe.FindStringSubmatch(i.Name)
+	return len(matches) > 0
+}
+
+func (p *Pool) ListAgents() ([]api.Instance, error) {
+	agents := []api.Instance{}
+	allInstances, err := p.c.GetInstances(api.InstanceTypeContainer)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, i := range allInstances {
+		if p.isAgent(i) {
+			agents = append(agents, i)
+		}
+	}
+
+	return agents, nil
+}
+
+func (p *Pool) ListAgentsFull() ([]api.InstanceFull, error) {
+	agents := []api.InstanceFull{}
+	allInstances, err := p.c.GetInstancesFull(api.InstanceTypeContainer)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, i := range allInstances {
+		if p.isAgent(i.Instance) {
+			agents = append(agents, i)
+		}
+	}
+
+	return agents, nil
+}
+
+func (p *Pool) Reconcile(desiredAgentCount int, agentsToCreate chan<- int) error {
+
+	var (
+		expectedInstances uint64 = math.MaxUint64 >> (63 - desiredAgentCount)
+		instancesFound    uint64 = 0
+	)
+
+	instances, err := p.ListAgents()
+	if err != nil {
+		return err
+	}
+
+	for _, i := range instances {
+		matches := p.agentRe.FindStringSubmatch(i.Name)
+		idx, err := strconv.Atoi(matches[1])
+		if err != nil {
+			return err
+		}
+
+		instancesFound |= 1 << idx
+	}
+
+	instancesToCreate := expectedInstances ^ instancesFound
+
+	for idx := range desiredAgentCount {
+		if (1<<idx)&instancesToCreate > 0 {
+			agentsToCreate <- idx
+		}
+	}
+
+	return nil
+
+}
+
+func (p *Pool) Reap(ctx context.Context) error {
+	now := time.Now()
+
+	instances, err := p.ListAgentsFull()
+	if err != nil {
+		return err
+	}
+
+	for _, instance := range instances {
+
+		idx := p.AgentIndex(instance.Name)
+		if idx == -1 {
+			continue
+		}
+
+		// Skip if already being created/reaped
+		if _, exists := p.inFlight.Load(idx); exists {
+			slog.Debug("reaper: skipping instance",
+				"reason", "in-flight",
+				"idx", idx,
+			)
+			continue
+		}
+
+		// Skip if container is not running
+		if instance.State == nil {
+			slog.Debug("reaper: skipping instance",
+				"reason", "instance state unknown",
+				"idx", idx,
+			)
+			continue
+		}
+
+		status := instance.State.Status
+		if status != "Running" {
+			slog.Debug("reaper: skipping instance",
+				"reason", fmt.Sprintf("container status: %s", status),
+				"idx", idx,
+			)
+			continue
+		}
+
+		// Skip if container is too young
+		age := now.Sub(instance.CreatedAt)
+		if age < p.conf.StartupGracePeriod {
+			slog.Debug("reaper: skipping instance",
+				"reason", "age < grace period",
+				"age", age,
+				"idx", idx,
+			)
+			continue
+		}
+
+		// Check if agent process is running
+		running, err := p.isAgentProcessRunning(ctx, idx)
+		if err != nil {
+			slog.Warn("reaper: health check failed", "idx", idx, "err", err)
+			continue
+		}
+
+		if running {
+			continue
+		}
+
+		if _, exists := p.inFlight.LoadOrStore(idx, true); exists {
+			continue
+		}
+
+		// Stale - reap it
+		slog.Info("reaper: reaping stale instance", "idx", idx, "age", age)
+
+		err = p.reapInstance(ctx, idx)
+		p.inFlight.Delete(idx)
+
+		if err != nil {
+			slog.Error("reaper: failed to reap", "idx", idx, "err", err)
+			agentsReapedErrorMetric.WithLabelValues("pool", p.conf.NamePrefix).Inc()
+		} else {
+			agentsReapedMetric.WithLabelValues("pool", p.conf.NamePrefix).Inc()
+		}
+	}
+
+	return nil
+
+}
+
+func (p *Pool) isAgentProcessRunning(ctx context.Context, idx int) (bool, error) {
+	op, err := p.c.ExecInstance(
+		p.AgentName(idx),
+		api.InstanceExecPost{
+			Command: []string{
+				"pgrep",
+				"-u",
+				provision.AgentUser,
+				"-f",
+				"run_agent.sh",
+			},
+			WaitForWS:   true,
+			Interactive: false,
+		},
+		&incus.InstanceExecArgs{},
+	)
+	if err != nil {
+		return false, fmt.Errorf("exec failed: %w", err)
+	}
+
+	if err := op.WaitContext(ctx); err != nil {
+		return false, fmt.Errorf("wait failed: %w", err)
+	}
+
+	meta := op.Get().Metadata
+	if meta == nil {
+		return false, fmt.Errorf("metadata is nil")
+	}
+
+	returnCode, ok := meta["return"].(float64)
+	if !ok {
+		return false, fmt.Errorf("return code not found")
+	}
+
+	return int(returnCode) == 0, nil
+}
+
+func (p *Pool) reapInstance(ctx context.Context, idx int) error {
+	name := p.AgentName(idx)
+
+	op, err := p.c.UpdateInstanceState(name, api.InstanceStatePut{
+		Action:  "stop",
+		Force:   true,
+		Timeout: 30,
+	}, "")
+	if err != nil {
+		if api.StatusErrorCheck(err, http.StatusNotFound) {
+			return nil
+		}
+		return err
+	}
+
+	if err := op.WaitContext(ctx); err != nil {
+		if api.StatusErrorCheck(err, http.StatusNotFound) {
+			return nil
+		}
+		return err
+	}
+
+	return nil
+}
+
+// AgentIndex returns the 0-based index of an agent based
+// on its name. For containers that are outside of this agent
+// pool, this function returns -1.
+func (p *Pool) AgentIndex(name string) int {
+	matches := p.agentRe.FindStringSubmatch(name)
+	if len(matches) == 0 {
+		return -1
+	}
+
+	idx, err := strconv.Atoi(matches[1])
+	if err != nil {
+		panic("all agents should have numeric index, enforced by agentRe")
+	}
+
+	return idx
+}
+
+func (p *Pool) AgentName(idx int) string {
+	return fmt.Sprintf("%s-%d", p.conf.NamePrefix, idx)
+}

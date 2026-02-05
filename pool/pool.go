@@ -221,7 +221,7 @@ func (p *Pool) Reconcile(agentsToCreate chan<- int) error {
 
 	for _, i := range instances {
 		matches := p.agentRe.FindStringSubmatch(i.Name)
-		if matches == nil || len(matches) < 2 {
+		if len(matches) < 2 {
 			return fmt.Errorf("instance name %q did not match agent regex", i.Name)
 		}
 		idx, err := strconv.Atoi(matches[1])

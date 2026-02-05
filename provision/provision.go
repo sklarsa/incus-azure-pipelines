@@ -28,6 +28,7 @@ const (
 type Config struct {
 	BaseAlias   string
 	TargetAlias string
+	ProjectName string
 	// Scripts is a list of local file paths containing scripts that are run after the initial
 	// base image provisioning. This allows users to customize their agent environments.
 	Scripts []string
@@ -37,6 +38,10 @@ type Config struct {
 var runAgentScript string
 
 func BaseImage(ctx context.Context, c incus.InstanceServer, conf Config) error {
+	if conf.ProjectName != "" {
+		c = c.UseProject(conf.ProjectName)
+	}
+
 	// First check that all provisioning scripts exist
 	provisioningScripts := [][]byte{}
 	for _, f := range conf.Scripts {

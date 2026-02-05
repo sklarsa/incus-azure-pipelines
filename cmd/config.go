@@ -10,7 +10,7 @@ import (
 )
 
 type cliConfig struct {
-	Pools []pool.Config `json:"pools" validate:"dive"`
+	Pools []pool.Config `json:"pools" validate:"unique=NamePrefix,dive"`
 	// MetricsPort is the port number that servers prometheus metrics
 	MetricsPort int           `json:"metricsPort" validate:"min=0"`
 	Daemon      daemon.Config `json:"daemon"`

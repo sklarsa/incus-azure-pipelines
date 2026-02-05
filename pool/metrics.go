@@ -21,7 +21,9 @@ func newAgentUptimeCollector(p *Pool) *agentUptimeCollector {
 			"iap_agent_uptime",
 			"Time (in seconds) an agent is up and running",
 			[]string{"idx"},
-			nil,
+			map[string]string{
+				"pool": p.Name(),
+			},
 		),
 	}
 }

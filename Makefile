@@ -7,7 +7,7 @@ vet:
 	go vet ./...
 
 test:
-	go test -v -coverprofile=cover.out ./...
+	go test -v -coverprofile=cover.out $(shell go list ./... | grep -v /mocks)
 	go tool cover -func=cover.out
 
 mocks:

@@ -23,7 +23,7 @@ var (
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "./config.yaml", "path to config file")
-	rootCmd.PersistentFlags().StringVarP(&logLevel, "log-level", "l", "debug", "log level (debug, info, warn, error)")
+	rootCmd.PersistentFlags().StringVarP(&logLevel, "log-level", "l", "info", "log level (debug, info, warn, error)")
 }
 
 var rootCmd = &cobra.Command{

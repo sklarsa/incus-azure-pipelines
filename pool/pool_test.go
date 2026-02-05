@@ -277,9 +277,9 @@ func TestAgentRe_Matching(t *testing.T) {
 	}{
 		{"valid 0", "azp-agent-0", true, "0"},
 		{"valid 12", "azp-agent-12", true, "12"},
+		{"valid 100", "azp-agent-100", true, "100"},
 		{"no match prefix", "other-agent-0", false, ""},
 		{"no match suffix", "azp-agent-abc", false, ""},
-		{"three digits", "azp-agent-100", false, ""},
 		{"empty suffix", "azp-agent-", false, ""},
 	}
 

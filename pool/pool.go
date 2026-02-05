@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -40,7 +39,7 @@ func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
 	}
 
 	var err error
-	p.agentRe, err = regexp.Compile("^" + conf.NamePrefix + `-(\d{1,2})$`)
+	p.agentRe, err = regexp.Compile("^" + conf.NamePrefix + `-(\d+)$`)
 	if err != nil {
 		return nil, fmt.Errorf("unable to construct agent regexp from NamePrefix %q: %w", conf.NamePrefix, err)
 	}
@@ -205,14 +204,7 @@ func (p *Pool) ListAgentsFull() ([]api.InstanceFull, error) {
 }
 
 func (p *Pool) Reconcile(agentsToCreate chan<- int) error {
-
-	var expectedInstances uint64
-	if p.conf.AgentCount == 0 {
-		expectedInstances = 0
-	} else if p.conf.AgentCount <= 64 {
-		expectedInstances = math.MaxUint64 >> (64 - p.conf.AgentCount)
-	}
-	var instancesFound uint64 = 0
+	instancesFound := make(map[int]struct{}, p.conf.AgentCount)
 
 	instances, err := p.ListAgents()
 	if err != nil {
@@ -228,20 +220,16 @@ func (p *Pool) Reconcile(agentsToCreate chan<- int) error {
 		if err != nil {
 			return err
 		}
-
-		instancesFound |= 1 << idx
+		instancesFound[idx] = struct{}{}
 	}
 
-	instancesToCreate := expectedInstances ^ instancesFound
-
 	for idx := range p.conf.AgentCount {
-		if (1<<idx)&instancesToCreate > 0 {
+		if _, exists := instancesFound[idx]; !exists {
 			agentsToCreate <- idx
 		}
 	}
 
 	return nil
-
 }
 
 func (p *Pool) Reap(ctx context.Context) error {

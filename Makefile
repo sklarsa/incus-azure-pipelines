@@ -7,9 +7,9 @@ vet:
 	go vet ./...
 
 test:
-	go test -v -coverprofile=cover.out ./...
+	go test -v -coverprofile=cover.out $(shell go list ./... | grep -v /mocks)
 	go tool cover -func=cover.out
 
 mocks:
-	mockery --name=InstanceServer --structname=MockInstanceServer --srcpkg=github.com/lxc/incus/v6/client --output=. --outpkg=main --filename=mock_incus_test.go --inpackage=false
-	mockery --name=Operation --structname=MockOperation --srcpkg=github.com/lxc/incus/v6/client --output=. --outpkg=main --filename=mock_operation_test.go --inpackage=false
+	mockery --name=InstanceServer --structname=MockInstanceServer --srcpkg=github.com/lxc/incus/v6/client --output=./mocks --outpkg=mocks --filename=mock_incus.go --inpackage=false
+	mockery --name=Operation --structname=MockOperation --srcpkg=github.com/lxc/incus/v6/client --output=./mocks --outpkg=mocks --filename=mock_operation.go --inpackage=false

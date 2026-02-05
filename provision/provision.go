@@ -1,8 +1,9 @@
-package main
+package provision
 
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -12,19 +13,39 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	incus "github.com/lxc/incus/v6/client"
 	"github.com/lxc/incus/v6/shared/api"
 	"github.com/schollz/progressbar/v3"
 )
 
+const (
+	AgentUid  uint32 = 1100
+	AgentGid  uint32 = 1100
+	AgentUser        = "agent"
+)
+
+type Config struct {
+	BaseAlias   string `validate:"required,nefield=TargetAlias"`
+	TargetAlias string `validate:"required"`
+	ProjectName string
+	// Scripts is a list of local file paths containing scripts that are run after the initial
+	// base image provisioning. This allows users to customize their agent environments.
+	Scripts []string
+}
+
 //go:embed run_agent.sh
 var runAgentScript string
 
-func provisionBaseInstance(ctx context.Context, c incus.InstanceServer, conf Config) error {
+func BaseImage(ctx context.Context, c incus.InstanceServer, conf Config) error {
+	if conf.ProjectName != "" {
+		c = c.UseProject(conf.ProjectName)
+	}
+
 	// First check that all provisioning scripts exist
 	provisioningScripts := [][]byte{}
-	for _, f := range conf.ProvisionScripts {
+	for _, f := range conf.Scripts {
 		data, err := os.ReadFile(f)
 		if err != nil {
 			return fmt.Errorf("error reading script %s: %w", f, err)
@@ -38,11 +59,11 @@ func provisionBaseInstance(ctx context.Context, c incus.InstanceServer, conf Con
 	}
 
 	req := api.InstancesPost{
-		Name: fmt.Sprintf("%s-builder-%s", defaultImageAlias, suffix),
+		Name: fmt.Sprintf("%s-builder-%s", conf.TargetAlias, suffix),
 		Source: api.InstanceSource{
 			Type:     "image",
 			Mode:     "pull",
-			Alias:    conf.BaseImage,
+			Alias:    conf.BaseAlias,
 			Server:   "https://images.linuxcontainers.org",
 			Protocol: "simplestreams",
 		},
@@ -80,9 +101,9 @@ func provisionBaseInstance(ctx context.Context, c incus.InstanceServer, conf Con
 	script := `
 set -euo pipefail
 AGENT_URL="` + agentURL + `"
-AGENT_USER="` + agentUser + `"
-AGENT_UID="` + strconv.Itoa(agentUid) + `"
-AGENT_GID="` + strconv.Itoa(agentGid) + `"
+AGENT_USER="` + AgentUser + `"
+AGENT_UID="` + strconv.Itoa(int(AgentUid)) + `"
+AGENT_GID="` + strconv.Itoa(int(AgentGid)) + `"
 AGENT_HOME="/home/${AGENT_USER}"
 
 apt-get update
@@ -136,8 +157,8 @@ su - "${AGENT_USER}" -c "
 			Content:   strings.NewReader(runAgentScript),
 			Mode:      0744,
 			WriteMode: "overwrite",
-			GID:       agentGid,
-			UID:       agentUid,
+			GID:       int64(AgentGid),
+			UID:       int64(AgentUid),
 		},
 	); err != nil {
 		return err
@@ -153,11 +174,11 @@ su - "${AGENT_USER}" -c "
 
 		op, err = c.ExecInstance(req.Name, execReq, args)
 		if err != nil {
-			return fmt.Errorf("error executing script %s: %w", conf.ProvisionScripts[idx], err)
+			return fmt.Errorf("error executing script %s: %w", conf.Scripts[idx], err)
 		}
 
 		if err := op.WaitContext(ctx); err != nil {
-			return fmt.Errorf("error executing script %s: %w", conf.ProvisionScripts[idx], err)
+			return fmt.Errorf("error executing script %s: %w", conf.Scripts[idx], err)
 		}
 
 	}
@@ -193,7 +214,7 @@ su - "${AGENT_USER}" -c "
 	}()
 
 	// Publish the image
-	slog.Info("publishing image", "instance", i.Name, "target", defaultImageAlias)
+	slog.Info("publishing image", "instance", i.Name, "target", conf.TargetAlias)
 	op, err = c.CreateImage(
 		api.ImagesPost{
 			Source: &api.ImagesPostSource{
@@ -202,7 +223,7 @@ su - "${AGENT_USER}" -c "
 			},
 			ImagePut: api.ImagePut{
 				Properties: map[string]string{
-					"description": fmt.Sprintf("azure pipeline runner built on %s", conf.BaseImage),
+					"description": fmt.Sprintf("azure pipeline runner built on %s", conf.BaseAlias),
 				},
 			},
 		},
@@ -268,20 +289,20 @@ su - "${AGENT_USER}" -c "
 	}
 
 	// Before aliasing the image, delete any existing aliases
-	_, _, err = c.GetImageAlias(defaultImageAlias)
+	_, _, err = c.GetImageAlias(conf.TargetAlias)
 	if err != nil {
 		if !api.StatusErrorCheck(err, http.StatusNotFound) {
 			return err
 		}
 	} else {
-		if err = c.DeleteImageAlias(defaultImageAlias); err != nil {
+		if err = c.DeleteImageAlias(conf.TargetAlias); err != nil {
 			return fmt.Errorf("error deleting the alias from old image: %w", err)
 		}
 	}
 
 	// Now create the alias for the image
 	ciReq := api.ImageAliasesPost{}
-	ciReq.Name = defaultImageAlias
+	ciReq.Name = conf.TargetAlias
 	ciReq.Type = "container"
 	ciReq.Target = fingerprint
 
@@ -306,7 +327,8 @@ func getAgentDownloadURL() (string, error) {
 	}
 
 	// Get latest version from GitHub
-	resp, err := http.Get("https://api.github.com/repos/microsoft/azure-pipelines-agent/releases/latest")
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get("https://api.github.com/repos/microsoft/azure-pipelines-agent/releases/latest")
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch latest release: %w", err)
 	}
@@ -334,4 +356,17 @@ func getAgentDownloadURL() (string, error) {
 	url := fmt.Sprintf("https://download.agent.dev.azure.com/agent/%s/vsts-agent-linux-%s-%s.tar.gz", version, archSuffix, version)
 
 	return url, nil
+}
+
+func randomString(n int) (string, error) {
+	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, n)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+	for i := range b {
+		b[i] = chars[b[i]%byte(len(chars))]
+	}
+	return string(b), nil
 }

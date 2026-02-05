@@ -27,8 +27,8 @@ const (
 )
 
 type Config struct {
-	BaseAlias   string
-	TargetAlias string
+	BaseAlias   string `validate:"required,nefield=TargetAlias"`
+	TargetAlias string `validate:"required"`
 	ProjectName string
 	// Scripts is a list of local file paths containing scripts that are run after the initial
 	// base image provisioning. This allows users to customize their agent environments.

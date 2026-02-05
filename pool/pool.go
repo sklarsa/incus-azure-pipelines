@@ -2,6 +2,7 @@ package pool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -40,6 +41,10 @@ func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
 	}
 
 	err = prometheus.DefaultRegisterer.Register(newAgentUptimeCollector(p))
+	var are prometheus.AlreadyRegisteredError
+	if errors.As(err, &are) {
+		err = nil
+	}
 	return p, err
 }
 
@@ -149,9 +154,9 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 	}()
 
 	if createErr == nil {
-		agentsCreatedMetric.WithLabelValues("pool", p.conf.NamePrefix).Inc()
+		agentsCreatedMetric.WithLabelValues(p.conf.NamePrefix).Inc()
 	} else {
-		agentsCreatedErrorMetric.WithLabelValues("pool", p.conf.NamePrefix).Inc()
+		agentsCreatedErrorMetric.WithLabelValues(p.conf.NamePrefix).Inc()
 	}
 
 	return createErr
@@ -197,10 +202,13 @@ func (p *Pool) ListAgentsFull() ([]api.InstanceFull, error) {
 
 func (p *Pool) Reconcile(desiredAgentCount int, agentsToCreate chan<- int) error {
 
-	var (
-		expectedInstances uint64 = math.MaxUint64 >> (63 - desiredAgentCount)
-		instancesFound    uint64 = 0
-	)
+	var expectedInstances uint64
+	if desiredAgentCount == 0 {
+		expectedInstances = 0
+	} else if desiredAgentCount <= 64 {
+		expectedInstances = math.MaxUint64 >> (64 - desiredAgentCount)
+	}
+	var instancesFound uint64 = 0
 
 	instances, err := p.ListAgents()
 	if err != nil {
@@ -244,15 +252,6 @@ func (p *Pool) Reap(ctx context.Context) error {
 			continue
 		}
 
-		// Skip if already being created/reaped
-		if _, exists := p.inFlight.Load(idx); exists {
-			slog.Debug("reaper: skipping instance",
-				"reason", "in-flight",
-				"idx", idx,
-			)
-			continue
-		}
-
 		// Skip if container is not running
 		if instance.State == nil {
 			slog.Debug("reaper: skipping instance",
@@ -290,10 +289,19 @@ func (p *Pool) Reap(ctx context.Context) error {
 		}
 
 		if running {
+			slog.Debug("reaper: skipping instance",
+				"reason", "agent process is running",
+				"age", age,
+				"idx", idx,
+			)
 			continue
 		}
 
 		if _, exists := p.inFlight.LoadOrStore(idx, true); exists {
+			slog.Debug("reaper: skipping instance",
+				"reason", "in-flight",
+				"idx", idx,
+			)
 			continue
 		}
 
@@ -305,9 +313,9 @@ func (p *Pool) Reap(ctx context.Context) error {
 
 		if err != nil {
 			slog.Error("reaper: failed to reap", "idx", idx, "err", err)
-			agentsReapedErrorMetric.WithLabelValues("pool", p.conf.NamePrefix).Inc()
+			agentsReapedErrorMetric.WithLabelValues(p.conf.NamePrefix).Inc()
 		} else {
-			agentsReapedMetric.WithLabelValues("pool", p.conf.NamePrefix).Inc()
+			agentsReapedMetric.WithLabelValues(p.conf.NamePrefix).Inc()
 		}
 	}
 

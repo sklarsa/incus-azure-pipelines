@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/lxc/incus/v6/shared/api"
 	"github.com/sklarsa/incus-azure-pipelines/mocks"
@@ -262,6 +263,13 @@ func TestPool_AgentIndex(t *testing.T) {
 }
 
 func TestAgentRe_Matching(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := Config{
+		NamePrefix: "azp-agent",
+	}
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
 	tests := []struct {
 		name    string
 		input   string
@@ -278,13 +286,6 @@ func TestAgentRe_Matching(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := mocks.NewMockInstanceServer(t)
-			conf := Config{
-				NamePrefix: "azp-agent",
-			}
-			pool, err := NewPool(m, conf)
-			require.NoError(t, err)
-
 			matches := pool.agentRe.FindStringSubmatch(tt.input)
 			if tt.match {
 				require.NotNil(t, matches)
@@ -294,4 +295,273 @@ func TestAgentRe_Matching(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPool_Reconcile_ZeroAgents(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstances", api.InstanceTypeContainer).Return([]api.Instance{}, nil)
+
+	pool, err := NewPool(m, testConfig())
+	require.NoError(t, err)
+
+	ch := make(chan int, 64)
+	err = pool.Reconcile(0, ch)
+	require.NoError(t, err)
+	close(ch)
+
+	assert.Empty(t, ch)
+}
+
+func TestPool_Reconcile_MaxAgents(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstances", api.InstanceTypeContainer).Return([]api.Instance{}, nil)
+
+	pool, err := NewPool(m, testConfig())
+	require.NoError(t, err)
+
+	ch := make(chan int, 64)
+	err = pool.Reconcile(64, ch)
+	require.NoError(t, err)
+	close(ch)
+
+	var created []int
+	for idx := range ch {
+		created = append(created, idx)
+	}
+
+	assert.Len(t, created, 64)
+	assert.Equal(t, 0, created[0])
+	assert.Equal(t, 63, created[63])
+}
+
+func TestPool_CreateAgent_InFlight(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	// Simulate in-flight by storing in the map
+	pool.inFlight.Store(0, true)
+
+	// Call should skip since already in-flight
+	err = pool.CreateAgent(context.Background(), 0)
+	require.NoError(t, err)
+
+	// CreateInstance should not have been called
+	m.AssertNotCalled(t, "CreateInstance", mock.Anything)
+}
+
+func TestPool_ListAgentsFull(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstancesFull", api.InstanceTypeContainer).Return([]api.InstanceFull{
+		{Instance: api.Instance{Name: "azp-agent-0"}},
+		{Instance: api.Instance{Name: "azp-agent-1"}},
+		{Instance: api.Instance{Name: "other-container"}},
+	}, nil)
+
+	pool, err := NewPool(m, testConfig())
+	require.NoError(t, err)
+
+	agents, err := pool.ListAgentsFull()
+	require.NoError(t, err)
+	assert.Len(t, agents, 2)
+	assert.Equal(t, "azp-agent-0", agents[0].Name)
+	assert.Equal(t, "azp-agent-1", agents[1].Name)
+}
+
+func TestPool_ListAgentsFull_Error(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstancesFull", api.InstanceTypeContainer).Return(nil, fmt.Errorf("connection refused"))
+
+	pool, err := NewPool(m, testConfig())
+	require.NoError(t, err)
+
+	_, err = pool.ListAgentsFull()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "connection refused")
+}
+
+func TestPool_Reap_SkipsNonRunning(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstancesFull", api.InstanceTypeContainer).Return([]api.InstanceFull{
+		{
+			Instance: api.Instance{Name: "azp-agent-0"},
+			State:    &api.InstanceState{Status: "Stopped"},
+		},
+	}, nil)
+
+	pool, err := NewPool(m, testConfig())
+	require.NoError(t, err)
+
+	err = pool.Reap(context.Background())
+	require.NoError(t, err)
+
+	// Should not attempt to stop or exec anything
+	m.AssertNotCalled(t, "UpdateInstanceState", mock.Anything, mock.Anything, mock.Anything)
+	m.AssertNotCalled(t, "ExecInstance", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestPool_Reap_SkipsNilState(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstancesFull", api.InstanceTypeContainer).Return([]api.InstanceFull{
+		{
+			Instance: api.Instance{Name: "azp-agent-0"},
+			State:    nil,
+		},
+	}, nil)
+
+	pool, err := NewPool(m, testConfig())
+	require.NoError(t, err)
+
+	err = pool.Reap(context.Background())
+	require.NoError(t, err)
+
+	m.AssertNotCalled(t, "UpdateInstanceState", mock.Anything, mock.Anything, mock.Anything)
+	m.AssertNotCalled(t, "ExecInstance", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestPool_Reap_SkipsYoungContainers(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstancesFull", api.InstanceTypeContainer).Return([]api.InstanceFull{
+		{
+			Instance: api.Instance{
+				Name:      "azp-agent-0",
+				CreatedAt: time.Now(), // Just created
+			},
+			State: &api.InstanceState{Status: "Running"},
+		},
+	}, nil)
+
+	conf := testConfig()
+	conf.StartupGracePeriod = 5 * time.Minute
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	err = pool.Reap(context.Background())
+	require.NoError(t, err)
+
+	m.AssertNotCalled(t, "UpdateInstanceState", mock.Anything, mock.Anything, mock.Anything)
+	m.AssertNotCalled(t, "ExecInstance", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestPool_Reap_SkipsRunningAgentProcess(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstancesFull", api.InstanceTypeContainer).Return([]api.InstanceFull{
+		{
+			Instance: api.Instance{
+				Name:      "azp-agent-0",
+				CreatedAt: time.Now().Add(-10 * time.Minute),
+			},
+			State: &api.InstanceState{Status: "Running"},
+		},
+	}, nil)
+
+	// pgrep returns 0 (process found)
+	execOp := mocks.NewMockOperation(t)
+	execOp.On("WaitContext", mock.Anything).Return(nil)
+	execOp.On("Get").Return(api.Operation{
+		Metadata: map[string]any{"return": float64(0)},
+	})
+	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(execOp, nil)
+
+	conf := testConfig()
+	conf.StartupGracePeriod = time.Minute
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	err = pool.Reap(context.Background())
+	require.NoError(t, err)
+
+	// Should not stop the instance
+	m.AssertNotCalled(t, "UpdateInstanceState", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestPool_Reap_ReapsStaleAgent(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstancesFull", api.InstanceTypeContainer).Return([]api.InstanceFull{
+		{
+			Instance: api.Instance{
+				Name:      "azp-agent-0",
+				CreatedAt: time.Now().Add(-10 * time.Minute),
+			},
+			State: &api.InstanceState{Status: "Running"},
+		},
+	}, nil)
+
+	// pgrep returns 1 (process not found)
+	execOp := mocks.NewMockOperation(t)
+	execOp.On("WaitContext", mock.Anything).Return(nil)
+	execOp.On("Get").Return(api.Operation{
+		Metadata: map[string]any{"return": float64(1)},
+	})
+	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(execOp, nil)
+
+	// Should stop the instance
+	stopOp := mocks.NewMockOperation(t)
+	stopOp.On("WaitContext", mock.Anything).Return(nil)
+	m.On("UpdateInstanceState", "azp-agent-0", mock.MatchedBy(func(req api.InstanceStatePut) bool {
+		return req.Action == "stop" && req.Force == true
+	}), "").Return(stopOp, nil)
+
+	conf := testConfig()
+	conf.StartupGracePeriod = time.Minute
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	err = pool.Reap(context.Background())
+	require.NoError(t, err)
+
+	m.AssertCalled(t, "UpdateInstanceState", "azp-agent-0", mock.Anything, "")
+}
+
+func TestPool_Reap_SkipsInFlight(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstancesFull", api.InstanceTypeContainer).Return([]api.InstanceFull{
+		{
+			Instance: api.Instance{
+				Name:      "azp-agent-0",
+				CreatedAt: time.Now().Add(-10 * time.Minute),
+			},
+			State: &api.InstanceState{Status: "Running"},
+		},
+	}, nil)
+
+	// pgrep returns 1 (process not found)
+	execOp := mocks.NewMockOperation(t)
+	execOp.On("WaitContext", mock.Anything).Return(nil)
+	execOp.On("Get").Return(api.Operation{
+		Metadata: map[string]any{"return": float64(1)},
+	})
+	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(execOp, nil)
+
+	conf := testConfig()
+	conf.StartupGracePeriod = time.Minute
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	// Mark as in-flight
+	pool.inFlight.Store(0, true)
+
+	err = pool.Reap(context.Background())
+	require.NoError(t, err)
+
+	// Should not stop the instance
+	m.AssertNotCalled(t, "UpdateInstanceState", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestPool_Reap_ListError(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstancesFull", api.InstanceTypeContainer).Return(nil, fmt.Errorf("connection refused"))
+
+	pool, err := NewPool(m, testConfig())
+	require.NoError(t, err)
+
+	err = pool.Reap(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "connection refused")
 }

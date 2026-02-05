@@ -52,6 +52,7 @@ func (c *agentUptimeCollector) Collect(ch chan<- prometheus.Metric) {
 
 		if err != nil {
 			slog.Error("error producing agent uptime metric", "err", err)
+			return
 		}
 
 		ch <- m

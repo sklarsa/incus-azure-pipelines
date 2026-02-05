@@ -15,10 +15,9 @@ import (
 
 func testConfig() Config {
 	return Config{
-		ProjectName: "test",
-		NamePrefix:  "azp-agent",
-		Image:       "test-image",
-		AgentCount:  3,
+		NamePrefix: "azp-agent",
+		Image:      "test-image",
+		AgentCount: 3,
 		Azure: AzureConfig{
 			PAT:  "test-token",
 			Pool: "default",
@@ -85,7 +84,7 @@ func TestPool_Reconcile_AllMissing(t *testing.T) {
 	require.NoError(t, err)
 
 	ch := make(chan int, 64)
-	err = pool.Reconcile(3, ch)
+	err = pool.Reconcile(ch)
 	require.NoError(t, err)
 	close(ch)
 
@@ -109,7 +108,7 @@ func TestPool_Reconcile_AllPresent(t *testing.T) {
 	require.NoError(t, err)
 
 	ch := make(chan int, 64)
-	err = pool.Reconcile(3, ch)
+	err = pool.Reconcile(ch)
 	require.NoError(t, err)
 	close(ch)
 
@@ -127,7 +126,7 @@ func TestPool_Reconcile_PartiallyPresent(t *testing.T) {
 	require.NoError(t, err)
 
 	ch := make(chan int, 64)
-	err = pool.Reconcile(3, ch)
+	err = pool.Reconcile(ch)
 	require.NoError(t, err)
 	close(ch)
 
@@ -147,7 +146,7 @@ func TestPool_Reconcile_Error(t *testing.T) {
 	require.NoError(t, err)
 
 	ch := make(chan int, 64)
-	err = pool.Reconcile(3, ch)
+	err = pool.Reconcile(ch)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "connection refused")
 }
@@ -301,11 +300,14 @@ func TestPool_Reconcile_ZeroAgents(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	m.On("GetInstances", api.InstanceTypeContainer).Return([]api.Instance{}, nil)
 
-	pool, err := NewPool(m, testConfig())
+	conf := testConfig()
+	conf.AgentCount = 0
+
+	pool, err := NewPool(m, conf)
 	require.NoError(t, err)
 
 	ch := make(chan int, 64)
-	err = pool.Reconcile(0, ch)
+	err = pool.Reconcile(ch)
 	require.NoError(t, err)
 	close(ch)
 
@@ -316,11 +318,14 @@ func TestPool_Reconcile_MaxAgents(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	m.On("GetInstances", api.InstanceTypeContainer).Return([]api.Instance{}, nil)
 
-	pool, err := NewPool(m, testConfig())
+	conf := testConfig()
+	conf.AgentCount = 64
+
+	pool, err := NewPool(m, conf)
 	require.NoError(t, err)
 
 	ch := make(chan int, 64)
-	err = pool.Reconcile(64, ch)
+	err = pool.Reconcile(ch)
 	require.NoError(t, err)
 	close(ch)
 

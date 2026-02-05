@@ -200,13 +200,13 @@ func (p *Pool) ListAgentsFull() ([]api.InstanceFull, error) {
 	return agents, nil
 }
 
-func (p *Pool) Reconcile(desiredAgentCount int, agentsToCreate chan<- int) error {
+func (p *Pool) Reconcile(agentsToCreate chan<- int) error {
 
 	var expectedInstances uint64
-	if desiredAgentCount == 0 {
+	if p.conf.AgentCount == 0 {
 		expectedInstances = 0
-	} else if desiredAgentCount <= 64 {
-		expectedInstances = math.MaxUint64 >> (64 - desiredAgentCount)
+	} else if p.conf.AgentCount <= 64 {
+		expectedInstances = math.MaxUint64 >> (64 - p.conf.AgentCount)
 	}
 	var instancesFound uint64 = 0
 
@@ -227,7 +227,7 @@ func (p *Pool) Reconcile(desiredAgentCount int, agentsToCreate chan<- int) error
 
 	instancesToCreate := expectedInstances ^ instancesFound
 
-	for idx := range desiredAgentCount {
+	for idx := range p.conf.AgentCount {
 		if (1<<idx)&instancesToCreate > 0 {
 			agentsToCreate <- idx
 		}
@@ -404,4 +404,8 @@ func (p *Pool) AgentIndex(name string) int {
 
 func (p *Pool) AgentName(idx int) string {
 	return fmt.Sprintf("%s-%d", p.conf.NamePrefix, idx)
+}
+
+func (p *Pool) Name() string {
+	return p.conf.NamePrefix
 }

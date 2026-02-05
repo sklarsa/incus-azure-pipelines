@@ -18,7 +18,7 @@ type cliConfig struct {
 
 func parseConfig(data []byte) (cliConfig, error) {
 	config := cliConfig{
-		MetricsPort: 8811,
+		MetricsPort: 9922,
 		Daemon: daemon.Config{
 			ReconcileInterval: 5 * time.Second,
 			ReaperInterval:    30 * time.Second,

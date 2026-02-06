@@ -12,7 +12,7 @@ import (
 // CLIConfig is the top-level configuration for the daemon.
 type CLIConfig struct {
 	// Pools is the list of agent pools to manage.
-	Pools []pool.Config `json:"pools,omitempty" validate:"unique=NamePrefix,dive"`
+	Pools []pool.Config `json:"pools,omitempty" validate:"unique=Name,dive"`
 	// MetricsPort is the port number that serves Prometheus metrics. Default: 9922
 	MetricsPort int `json:"metricsPort,omitempty" validate:"min=0"`
 	// Daemon contains settings for the background daemon processes.

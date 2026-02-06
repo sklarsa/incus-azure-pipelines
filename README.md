@@ -54,29 +54,29 @@ First, you need to craft a config file. See the [configuration schema](https://s
 
 ```yaml
 ---
-projectName: azure-pipelines
-agentCount: 8
-baseImage: ubuntu/24.04
-maxCores: 8
-maxRamInGb: 4
-tmpfsSizeInGb: 12
-provisionScripts:
-- /tmp/script1.sh
-- /tmp/script2.sh
-azure:
-  pat: myVerySecretPatHere
-  url: https://dev.azure.com/<my-organization>
-  pool: myAgentPool
+metricsPort: 9922
+pools:
+  - name: myAgentPool
+    agentCount: 8
+    azure:
+      pat: myVerySecretPatHere
+      url: https://dev.azure.com/<my-organization>
+    incus:
+      projectName: azure-pipelines
+      image: my-runner-image
+      maxCores: 8
+      maxRamInGb: 4
+      tmpfsSizeInGb: 12
 ```
 
 ### Create a base image
 
 You first need to build the base image that your runners will use. We install some basic utilities and pre-provision the `agent` user, since the Azure Pipelines Agent should not be run as `root`.
 
-You can also add your own custom provisioning by writing scripts and adding them to the `provisionScripts` list in the config. These scripts will be executed in order.
+You can also add your own custom provisioning by writing scripts and passing them with the `--scripts` flag. These scripts will be executed in order.
 
 ```bash
-incus-azure-pipelines -provision -config $PATH_OF_CONFIG_FILE
+incus-azure-pipelines provision --base ubuntu/24.04 --target my-runner-image --scripts /tmp/script1.sh --scripts /tmp/script2.sh
 ```
 
 ### Run the orchestrator
@@ -86,5 +86,5 @@ Finally, start the orchestrator using some daemonizer (most likely systemd, let'
 The command to run the orchestrator is
 
 ```bash
-incus-azure-pipelines -run -config $PATH_OF_CONFIG_FILE`
+incus-azure-pipelines run --config $PATH_OF_CONFIG_FILE
 ```

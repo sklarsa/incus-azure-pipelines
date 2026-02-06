@@ -164,11 +164,14 @@ func TestPool_Create(t *testing.T) {
 	op.On("WaitContext", mock.Anything).Return(nil)
 
 	m.On("CreateInstance", mock.MatchedBy(func(req api.InstancesPost) bool {
+		tmpfs, hasTmpfs := req.Devices["tmpfs"]
 		return req.Name == "azp-agent-0" &&
 			req.Start == true &&
 			req.InstancePut.Ephemeral == true &&
 			req.Config["limits.cpu.allowance"] == "400%" &&
-			req.Config["limits.memory"] == "8GiB"
+			req.Config["limits.memory"] == "8GiB" &&
+			hasTmpfs &&
+			tmpfs["size"] == "12GiB"
 	})).Return(op, nil)
 
 	m.On("CreateInstanceFile", "azp-agent-0", "/home/agent/.token", mock.Anything).Return(nil)
@@ -198,11 +201,12 @@ func TestPool_Create_Error(t *testing.T) {
 	assert.Contains(t, err.Error(), "disk full")
 }
 
-func TestPool_Create_NoCpuLimitWhenZero(t *testing.T) {
+func TestPool_Create_NoLimitsWhenZero(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	conf := testConfig()
 	conf.Incus.MaxCores = 0
 	conf.Incus.MaxRamInGb = 0
+	conf.Incus.TmpfsSizeInGb = 0
 
 	op := mocks.NewMockOperation(t)
 	op.On("WaitContext", mock.Anything).Return(nil)
@@ -210,7 +214,8 @@ func TestPool_Create_NoCpuLimitWhenZero(t *testing.T) {
 	m.On("CreateInstance", mock.MatchedBy(func(req api.InstancesPost) bool {
 		_, hasCpu := req.Config["limits.cpu.allowance"]
 		_, hasMem := req.Config["limits.memory"]
-		return !hasCpu && !hasMem
+		_, hasTmpfs := req.Devices["tmpfs"]
+		return !hasCpu && !hasMem && !hasTmpfs
 	})).Return(op, nil)
 
 	m.On("CreateInstanceFile", mock.Anything, mock.Anything, mock.Anything).Return(nil)

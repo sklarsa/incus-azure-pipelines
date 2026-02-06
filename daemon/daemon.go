@@ -12,9 +12,9 @@ import (
 // Config contains settings for daemon background processes.
 type Config struct {
 	// ReaperInterval is how often to check for and clean up stale agents. Default: 30s
-	ReaperInterval time.Duration `json:"reaperInterval"`
+	ReaperInterval time.Duration `json:"reaperInterval,omitempty"`
 	// ReconcileInterval is how often to reconcile expected vs actual agent count. Default: 5s
-	ReconcileInterval time.Duration `json:"reconcileInterval"`
+	ReconcileInterval time.Duration `json:"reconcileInterval,omitempty"`
 }
 
 func Run(ctx context.Context, p *pool.Pool, conf Config) {

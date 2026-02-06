@@ -633,3 +633,32 @@ func TestPool_AgentLogs_WaitError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "wait failed")
 }
+
+func TestPool_Create_WithAgentPrefix(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+	conf.AgentPrefix = "custom-prefix"
+
+	op := mocks.NewMockOperation(t)
+	op.On("WaitContext", mock.Anything).Return(nil)
+
+	m.On("CreateInstance", mock.Anything).Return(op, nil)
+	m.On("CreateInstanceFile", "azp-agent-0", "/home/agent/.token", mock.Anything).Return(nil)
+
+	execOp := mocks.NewMockOperation(t)
+	execOp.On("WaitContext", mock.Anything).Return(nil)
+	m.On("ExecInstance", "azp-agent-0", mock.MatchedBy(func(req api.InstanceExecPost) bool {
+		for i, arg := range req.Command {
+			if arg == "--agent" && i+1 < len(req.Command) {
+				return req.Command[i+1] == "custom-prefix-0"
+			}
+		}
+		return false
+	}), mock.Anything).Return(execOp, nil)
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	err = pool.CreateAgent(context.Background(), 0)
+	require.NoError(t, err)
+}

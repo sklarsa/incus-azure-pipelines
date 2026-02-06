@@ -5,6 +5,10 @@ import "time"
 type Config struct {
 	// AgentCount is the number of agents to run on this node
 	AgentCount int `json:"agentCount" validate:"required,min=1,max=64"`
+	// AgentPrefix overrides the hostname used for Azure agent naming.
+	// If not set, defaults to the machine's hostname.
+	// Must be unique per host to avoid agent name collisions.
+	AgentPrefix string `json:"agentPrefix,omitempty" validate:"omitempty,hostname"`
 	// Azure specific settings
 	Azure AzureConfig `json:"azure" validate:"required"`
 	// Incus specific settings

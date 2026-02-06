@@ -27,7 +27,7 @@ var runCmd = &cobra.Command{
 			wg.Go(func() {
 				p, err := pool.NewPool(c, cfg)
 				if err != nil {
-					slog.Error("error initializing agent pool", "err", err, "pool", cfg.NamePrefix)
+					slog.Error("error initializing agent pool", "err", err, "pool", cfg.Name)
 					return
 				}
 

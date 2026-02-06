@@ -14,9 +14,10 @@ func init() {
 }
 
 var logsCmd = &cobra.Command{
-	Use:   "logs <pool> <agent-index>",
-	Short: "output logs for a given agent",
-	Args:  cobra.ExactArgs(2),
+	Use:     "logs <pool> <agent-index>",
+	Short:   "output logs for a given agent",
+	Args:    cobra.ExactArgs(2),
+	PreRunE: loadConfig,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		poolName := args[0]
 		idxStr := args[1]

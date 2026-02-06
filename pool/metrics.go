@@ -41,7 +41,10 @@ func (c *agentUptimeCollector) Collect(ch chan<- prometheus.Metric) {
 
 	for _, i := range instances {
 
-		idx := c.p.AgentIndex(i.Name)
+		idx, err := c.p.AgentIndex(i.Name)
+		if err != nil {
+			continue
+		}
 
 		val := time.Since(i.CreatedAt).Seconds()
 

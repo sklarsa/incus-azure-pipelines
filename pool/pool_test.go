@@ -262,10 +262,19 @@ func TestPool_AgentIndex(t *testing.T) {
 	pool, err := NewPool(m, conf)
 	require.NoError(t, err)
 
-	assert.Equal(t, 0, pool.AgentIndex("azp-agent-0"))
-	assert.Equal(t, 12, pool.AgentIndex("azp-agent-12"))
-	assert.Equal(t, -1, pool.AgentIndex("other-agent-0"))
-	assert.Equal(t, -1, pool.AgentIndex("azp-agent-abc"))
+	idx, err := pool.AgentIndex("azp-agent-0")
+	require.NoError(t, err)
+	assert.Equal(t, 0, idx)
+
+	idx, err = pool.AgentIndex("azp-agent-12")
+	require.NoError(t, err)
+	assert.Equal(t, 12, idx)
+
+	_, err = pool.AgentIndex("other-agent-0")
+	assert.ErrorIs(t, err, ErrNotPoolAgent)
+
+	_, err = pool.AgentIndex("azp-agent-abc")
+	assert.ErrorIs(t, err, ErrNotPoolAgent)
 }
 
 func TestAgentRe_Matching(t *testing.T) {

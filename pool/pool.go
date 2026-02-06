@@ -249,8 +249,8 @@ func (p *Pool) Reap(ctx context.Context) error {
 
 	for _, instance := range instances {
 
-		idx := p.AgentIndex(instance.Name)
-		if idx == -1 {
+		idx, err := p.AgentIndex(instance.Name)
+		if err != nil {
 			continue
 		}
 
@@ -387,21 +387,23 @@ func (p *Pool) reapInstance(ctx context.Context, idx int) error {
 	return nil
 }
 
-// AgentIndex returns the 0-based index of an agent based
-// on its name. For containers that are outside of this agent
-// pool, this function returns -1.
-func (p *Pool) AgentIndex(name string) int {
+// ErrNotPoolAgent is returned when a container name does not match this pool's naming pattern.
+var ErrNotPoolAgent = errors.New("not a pool agent")
+
+// AgentIndex returns the 0-based index of an agent based on its name.
+// Returns ErrNotPoolAgent if the name doesn't match this pool's agent pattern.
+func (p *Pool) AgentIndex(name string) (int, error) {
 	matches := p.agentRe.FindStringSubmatch(name)
 	if len(matches) == 0 {
-		return -1
+		return 0, ErrNotPoolAgent
 	}
 
 	idx, err := strconv.Atoi(matches[1])
 	if err != nil {
-		panic("all agents should have numeric index, enforced by agentRe")
+		return 0, fmt.Errorf("parse agent index from %q: %w", name, err)
 	}
 
-	return idx
+	return idx, nil
 }
 
 func (p *Pool) AgentName(idx int) string {

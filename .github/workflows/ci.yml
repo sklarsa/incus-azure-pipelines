@@ -24,7 +24,7 @@ jobs:
       - name: check schema is up to date
         run: |
           make schema
-          git diff --exit-code schema.json
+          git diff --exit-code docs/schema.json
 
       - name: test
         run: make test

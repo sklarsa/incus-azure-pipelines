@@ -15,4 +15,4 @@ mocks:
 	mockery --name=Operation --structname=MockOperation --srcpkg=github.com/lxc/incus/v6/client --output=./mocks --outpkg=mocks --filename=mock_operation.go --inpackage=false
 
 schema:
-	go run ./tools/schema > schema.json
+	go run ./tools/schema > docs/schema.json

@@ -271,10 +271,10 @@ func TestPool_AgentIndex(t *testing.T) {
 	assert.Equal(t, 12, idx)
 
 	_, err = pool.agentIndex("other-agent-0")
-	assert.ErrorIs(t, err, ErrNotPoolAgent)
+	assert.ErrorIs(t, err, errNotPoolAgent)
 
 	_, err = pool.agentIndex("azp-agent-abc")
-	assert.ErrorIs(t, err, ErrNotPoolAgent)
+	assert.ErrorIs(t, err, errNotPoolAgent)
 }
 
 func TestAgentRe_Matching(t *testing.T) {

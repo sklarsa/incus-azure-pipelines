@@ -34,11 +34,30 @@
         "reconcileInterval": {
           "type": "integer",
           "description": "ReconcileInterval is how often to reconcile expected vs actual agent count. Default: 5s"
+        },
+        "listener": {
+          "$ref": "#/$defs/DaemonListenerConfig",
+          "description": "Listener contains settings for the event listener."
         }
       },
       "additionalProperties": false,
       "type": "object",
       "description": "Config contains settings for daemon background processes."
+    },
+    "DaemonListenerConfig": {
+      "properties": {
+        "retryDelay": {
+          "type": "integer",
+          "description": "RetryDelay is the initial delay between retries. Default: 1s"
+        },
+        "maxRetryDelay": {
+          "type": "integer",
+          "description": "MaxRetryDelay is the maximum delay between retries. Default: 1m"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "ListenerConfig contains settings for event listener retry behavior."
     },
     "PoolAzureConfig": {
       "properties": {

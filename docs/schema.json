@@ -64,6 +64,10 @@
           "type": "integer",
           "description": "AgentCount is the number of agents to run on this node"
         },
+        "agentPrefix": {
+          "type": "string",
+          "description": "AgentPrefix overrides the hostname used for Azure agent naming.\nIf not set, defaults to the machine's hostname.\nMust be unique per host to avoid agent name collisions."
+        },
         "azure": {
           "$ref": "#/$defs/PoolAzureConfig",
           "description": "Azure specific settings"

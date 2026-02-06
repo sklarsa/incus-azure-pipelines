@@ -124,9 +124,13 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 			return err
 		}
 
-		hostname, err := os.Hostname()
-		if err != nil {
-			return err
+		agentPrefix := p.conf.AgentPrefix
+		if agentPrefix == "" {
+			var err error
+			agentPrefix, err = os.Hostname()
+			if err != nil {
+				return err
+			}
 		}
 
 		op, err = p.c.ExecInstance(
@@ -137,7 +141,7 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 					"--fork",
 					"/home/agent/run_agent.sh",
 					"--agent",
-					fmt.Sprintf("%s-%d", hostname, idx),
+					fmt.Sprintf("%s-%d", agentPrefix, idx),
 					"--pool",
 					p.conf.Name,
 					"--url",

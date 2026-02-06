@@ -387,15 +387,15 @@ func (p *Pool) reapInstance(ctx context.Context, idx int) error {
 	return nil
 }
 
-// ErrNotPoolAgent is returned when a container name does not match this pool's naming pattern.
-var ErrNotPoolAgent = errors.New("not a pool agent")
+// errNotPoolAgent is returned when a container name does not match this pool's naming pattern.
+var errNotPoolAgent = errors.New("not a pool agent")
 
 // agentIndex returns the 0-based index of an agent based on its name.
 // Returns ErrNotPoolAgent if the name doesn't match this pool's agent pattern.
 func (p *Pool) agentIndex(name string) (int, error) {
 	matches := p.agentRe.FindStringSubmatch(name)
 	if len(matches) == 0 {
-		return 0, ErrNotPoolAgent
+		return 0, errNotPoolAgent
 	}
 
 	idx, err := strconv.Atoi(matches[1])

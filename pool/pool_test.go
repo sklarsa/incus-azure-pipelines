@@ -1,6 +1,7 @@
 package pool
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"testing"
@@ -570,4 +571,60 @@ func TestPool_Reap_ListError(t *testing.T) {
 	err = pool.Reap(context.Background())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "connection refused")
+}
+
+func TestPool_AgentLogs_InvalidIndex(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+
+	pool, err := NewPool(m, testConfig())
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = pool.AgentLogs(10, &buf) // Pool has 3 agents (0, 1, 2)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid agent index 10")
+}
+
+func TestPool_AgentLogs_ExecError(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(nil, fmt.Errorf("instance not found"))
+
+	pool, err := NewPool(m, testConfig())
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = pool.AgentLogs(0, &buf)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "instance not found")
+}
+
+func TestPool_AgentLogs_Success(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+
+	execOp := mocks.NewMockOperation(t)
+	execOp.On("Wait").Return(nil)
+	m.On("ExecInstance", "azp-agent-1", mock.Anything, mock.Anything).Return(execOp, nil)
+
+	pool, err := NewPool(m, testConfig())
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = pool.AgentLogs(1, &buf)
+	require.NoError(t, err)
+}
+
+func TestPool_AgentLogs_WaitError(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+
+	execOp := mocks.NewMockOperation(t)
+	execOp.On("Wait").Return(fmt.Errorf("wait failed"))
+	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(execOp, nil)
+
+	pool, err := NewPool(m, testConfig())
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = pool.AgentLogs(0, &buf)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "wait failed")
 }

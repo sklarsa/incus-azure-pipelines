@@ -25,6 +25,10 @@ func parseConfig(data []byte) (CLIConfig, error) {
 		Daemon: daemon.Config{
 			ReconcileInterval: 5 * time.Second,
 			ReaperInterval:    30 * time.Second,
+			Listener: daemon.ListenerConfig{
+				RetryDelay:    1 * time.Second,
+				MaxRetryDelay: 1 * time.Minute,
+			},
 		},
 	}
 

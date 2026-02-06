@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/sklarsa/incus-azure-pipelines/pool"
 )
 
@@ -15,6 +16,16 @@ type Config struct {
 	ReaperInterval time.Duration `json:"reaperInterval,omitempty"`
 	// ReconcileInterval is how often to reconcile expected vs actual agent count. Default: 5s
 	ReconcileInterval time.Duration `json:"reconcileInterval,omitempty"`
+	// Listener contains settings for the event listener.
+	Listener ListenerConfig `json:"listener,omitempty"`
+}
+
+// ListenerConfig contains settings for event listener retry behavior.
+type ListenerConfig struct {
+	// RetryDelay is the initial delay between retries. Default: 1s
+	RetryDelay time.Duration `json:"retryDelay,omitempty"`
+	// MaxRetryDelay is the maximum delay between retries. Default: 1m
+	MaxRetryDelay time.Duration `json:"maxRetryDelay,omitempty"`
 }
 
 func Run(ctx context.Context, p *pool.Pool, conf Config) {
@@ -73,15 +84,22 @@ func Run(ctx context.Context, p *pool.Pool, conf Config) {
 		logger.Info("starting goroutine", "type", "event-listener")
 		defer logger.Info("exiting goroutine", "type", "event-listener")
 
-		l, err := pool.NewListener(p, agentsToCreate)
-		if err != nil {
-			logger.Error("error starting up listener", "err", err)
-			return
+		err := retry.Do(
+			func() error {
+				return p.ListenForDeletes(ctx, agentsToCreate)
+			},
+			retry.Context(ctx),
+			retry.Attempts(0), // unlimited
+			retry.Delay(conf.Listener.RetryDelay),
+			retry.MaxDelay(conf.Listener.MaxRetryDelay),
+			retry.DelayType(retry.BackOffDelay),
+			retry.OnRetry(func(n uint, err error) {
+				logger.Warn("event listener disconnected, retrying", "attempt", n+1, "err", err)
+			}),
+		)
+		if err != nil && ctx.Err() == nil {
+			logger.Error("listener error", "err", err)
 		}
-		defer l.Close()
-
-		<-ctx.Done()
-
 	})
 
 	wg.Go(func() {

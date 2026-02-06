@@ -32,7 +32,7 @@ func (p *Pool) ListenForDeletes(ctx context.Context, agentsToCreate chan<- int) 
 				return
 			}
 
-			idx, err := p.AgentIndex(instance)
+			idx, err := p.agentIndex(instance)
 			if err != nil {
 				return
 			}

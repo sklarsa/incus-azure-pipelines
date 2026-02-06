@@ -17,7 +17,7 @@ var (
 	ctx, cancel = context.WithCancel(context.Background())
 
 	configPath string
-	conf       cliConfig
+	conf       CLIConfig
 	c          incus.InstanceServer
 	logLevel   string
 )

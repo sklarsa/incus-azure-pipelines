@@ -9,8 +9,11 @@ import (
 	"github.com/sklarsa/incus-azure-pipelines/pool"
 )
 
+// Config contains settings for daemon background processes.
 type Config struct {
-	ReaperInterval    time.Duration `json:"reaperInterval"`
+	// ReaperInterval is how often to check for and clean up stale agents. Default: 30s
+	ReaperInterval time.Duration `json:"reaperInterval"`
+	// ReconcileInterval is how often to reconcile expected vs actual agent count. Default: 5s
 	ReconcileInterval time.Duration `json:"reconcileInterval"`
 }
 

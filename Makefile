@@ -1,4 +1,4 @@
-.PHONY: lint vet test mocks
+.PHONY: lint vet test mocks schema
 
 lint: vet
 	golangci-lint run
@@ -13,3 +13,6 @@ test:
 mocks:
 	mockery --name=InstanceServer --structname=MockInstanceServer --srcpkg=github.com/lxc/incus/v6/client --output=./mocks --outpkg=mocks --filename=mock_incus.go --inpackage=false
 	mockery --name=Operation --structname=MockOperation --srcpkg=github.com/lxc/incus/v6/client --output=./mocks --outpkg=mocks --filename=mock_operation.go --inpackage=false
+
+schema:
+	go run ./tools/schema > docs/schema.json

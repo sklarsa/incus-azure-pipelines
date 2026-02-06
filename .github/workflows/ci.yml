@@ -2,6 +2,7 @@ name: ci
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -20,3 +21,11 @@ jobs:
       - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.7.2
+
+      - name: check schema is up to date
+        run: |
+          make schema
+          git diff --exit-code docs/schema.json
+
+      - name: test
+        run: make test

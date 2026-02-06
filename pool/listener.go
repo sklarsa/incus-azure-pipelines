@@ -52,11 +52,12 @@ func NewListener(p *Pool, agentsToCreate chan<- int) (*Listener, error) {
 				return
 			}
 
-			idx := p.AgentIndex(instance)
-			if idx >= 0 {
-				l.p.logger.Info("container deleted", "name", instance)
-				agentsToCreate <- idx
+			idx, err := p.AgentIndex(instance)
+			if err != nil {
+				return
 			}
+			l.p.logger.Info("container deleted", "name", instance)
+			agentsToCreate <- idx
 		}
 
 	})

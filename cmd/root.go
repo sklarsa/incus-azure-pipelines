@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	incus "github.com/lxc/incus/v6/client"
@@ -22,7 +23,8 @@ var (
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&configPath, "config", "./config.yaml", "path to config file")
+
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "path to config file")
 	rootCmd.PersistentFlags().StringVarP(&logLevel, "log-level", "l", "info", "log level (debug, info, warn, error)")
 }
 
@@ -32,6 +34,14 @@ var rootCmd = &cobra.Command{
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if configPath == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("cannot determine home directory, use --config: %w", err)
+			}
+			configPath = filepath.Join(home, ".incus-azure-pipelines", "config.yaml")
+		}
+
 		// Init logging
 		var level slog.Level
 		if err := level.UnmarshalText([]byte(logLevel)); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -399,6 +400,28 @@ func (p *Pool) AgentIndex(name string) int {
 
 func (p *Pool) AgentName(idx int) string {
 	return fmt.Sprintf("%s-%d", p.conf.NamePrefix, idx)
+}
+
+func (p *Pool) AgentLogs(idx int, w io.Writer) error {
+
+	if idx >= p.conf.AgentCount {
+		return fmt.Errorf("invalid agent index %d, pool %q has %d agents", idx, p.Name(), p.conf.AgentCount)
+	}
+
+	op, err := p.c.ExecInstance(
+		p.AgentName(idx),
+		api.InstanceExecPost{
+			Command:     []string{"cat", "/home/agent/azp-agent.log"},
+			WaitForWS:   true,
+			Interactive: false,
+		}, &incus.InstanceExecArgs{
+			Stdout: w,
+		},
+	)
+	if err != nil {
+		return err
+	}
+	return op.Wait()
 }
 
 func (p *Pool) Name() string {

@@ -84,14 +84,7 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 					"boot.host_shutdown_action": "force-stop",
 				},
 				Ephemeral: true,
-				Devices: map[string]map[string]string{
-					"tmpfs": {
-						"type":   "disk",
-						"source": "tmpfs:",
-						"path":   "/tmp",
-						"size":   fmt.Sprintf("%dGiB", p.conf.Incus.TmpfsSizeInGb),
-					},
-				},
+				Devices:   map[string]map[string]string{},
 			},
 		}
 
@@ -101,6 +94,15 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 
 		if p.conf.Incus.MaxRamInGb > 0 {
 			req.Config["limits.memory"] = fmt.Sprintf("%dGiB", p.conf.Incus.MaxRamInGb)
+		}
+
+		if p.conf.Incus.TmpfsSizeInGb > 0 {
+			req.Devices["tmpfs"] = map[string]string{
+				"type":   "disk",
+				"source": "tmpfs:",
+				"path":   "/tmp",
+				"size":   fmt.Sprintf("%dGiB", p.conf.Incus.TmpfsSizeInGb),
+			}
 		}
 
 		op, err := p.c.CreateInstance(req)

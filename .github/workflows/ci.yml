@@ -22,10 +22,19 @@ jobs:
         with:
           version: v2.7.2
 
+      - name: test
+        run: make test
+
+  schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
       - name: check schema is up to date
         run: |
           make schema
           git diff --exit-code docs/schema.json
-
-      - name: test
-        run: make test

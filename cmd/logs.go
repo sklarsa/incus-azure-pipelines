@@ -27,7 +27,7 @@ var logsCmd = &cobra.Command{
 		}
 
 		for _, cfg := range conf.Pools {
-			if cfg.NamePrefix == poolName {
+			if cfg.Name == poolName {
 				if idx >= cfg.AgentCount {
 					return fmt.Errorf("invalid agent index %d, pool %q has %d agents", idx, poolName, cfg.AgentCount)
 				}

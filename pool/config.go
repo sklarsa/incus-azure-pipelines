@@ -3,10 +3,18 @@ package pool
 import "time"
 
 type Config struct {
-	// ProjectName is the name of the incus project used for Azure Pipelines Agent runners
-	ProjectName string `json:"projectName" validate:"required"`
 	// AgentCount is the number of agents to run on this node
-	AgentCount int `json:"agentCount,omitempty" validate:"min=1,max=64"`
+	AgentCount int `json:"agentCount" validate:"required,min=1,max=64"`
+	// Azure specific settings
+	Azure AzureConfig `json:"azure" validate:"required"`
+	// Incus specific settings
+	Incus IncusConfig `json:"incus" validate:"required"`
+	// Name is the name of the Azure Devops pool to run agents for.
+	// This is also used to name running containers.
+	Name string `json:"name" validate:"required,hostname"`
+}
+
+type IncusConfig struct {
 	// MaxCores specifies the max number of cores that each agent can use. Used to set limits.cpu.allowance
 	// for percentage-based soft limits
 	MaxCores int `json:"maxCores,omitempty" validate:"min=0"`
@@ -14,10 +22,8 @@ type Config struct {
 	MaxRamInGb int `json:"maxRamInGb,omitempty" validate:"min=0"`
 	// TmpfsSizeInGb specifies the maximum size of the tmpfs directory mounted to /tmp in each agent container
 	TmpfsSizeInGb int `json:"tmpfsSizeInGb,omitempty" validate:"min=0"`
-	// Azure specific settings
-	Azure AzureConfig `json:"azure" validate:"required"`
-	// NamePrefix is the prefix used for naming agent containers
-	NamePrefix string `json:"namePrefix" validate:"required,hostname"`
+	// ProjectName is the name of the incus project used for Azure Pipelines Agent runners
+	ProjectName string `json:"projectName,omitempty"`
 	// Image is the Incus image alias to use for agent containers
 	Image string `json:"image" validate:"required"`
 	// StartupGracePeriod is how long to wait before considering an agent stale
@@ -27,8 +33,6 @@ type Config struct {
 type AzureConfig struct {
 	// PAT is an Azure Devops personal access token used for registering the agents
 	PAT string `json:"pat" validate:"required"`
-	// Pool is the pool name for the agent to join
-	Pool string `json:"pool" validate:"required"`
 	// Url of the server. For example: https://dev.azure.com/myorganization or http://my-azure-devops-server:8080/tfs
 	Url string `json:"url" validate:"required,url"`
 }

@@ -29,20 +29,20 @@ type Pool struct {
 }
 
 func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
-	if conf.ProjectName != "" {
-		c = c.UseProject(conf.ProjectName)
+	if conf.Incus.ProjectName != "" {
+		c = c.UseProject(conf.Incus.ProjectName)
 	}
 	p := &Pool{
 		c:        c,
 		conf:     conf,
 		inFlight: &sync.Map{},
-		logger:   slog.With("pool", conf.NamePrefix, "project", conf.ProjectName),
+		logger:   slog.With("pool", conf.Name, "project", conf.Incus.ProjectName),
 	}
 
 	var err error
-	p.agentRe, err = regexp.Compile("^" + conf.NamePrefix + `-(\d+)$`)
+	p.agentRe, err = regexp.Compile("^" + conf.Name + `-(\d+)$`)
 	if err != nil {
-		return nil, fmt.Errorf("unable to construct agent regexp from NamePrefix %q: %w", conf.NamePrefix, err)
+		return nil, fmt.Errorf("unable to construct agent regexp from Name %q: %w", conf.Name, err)
 	}
 
 	err = prometheus.DefaultRegisterer.Register(newAgentUptimeCollector(p))
@@ -75,7 +75,7 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 			Name: p.AgentName(idx),
 			Type: api.InstanceTypeContainer,
 			Source: api.InstanceSource{
-				Alias: p.conf.Image,
+				Alias: p.conf.Incus.Image,
 				Type:  "image",
 			},
 			Start: true,
@@ -89,18 +89,18 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 						"type":   "disk",
 						"source": "tmpfs:",
 						"path":   "/tmp",
-						"size":   fmt.Sprintf("%dGiB", p.conf.TmpfsSizeInGb),
+						"size":   fmt.Sprintf("%dGiB", p.conf.Incus.TmpfsSizeInGb),
 					},
 				},
 			},
 		}
 
-		if p.conf.MaxCores > 0 {
-			req.Config["limits.cpu.allowance"] = fmt.Sprintf("%d%%", p.conf.MaxCores*100)
+		if p.conf.Incus.MaxCores > 0 {
+			req.Config["limits.cpu.allowance"] = fmt.Sprintf("%d%%", p.conf.Incus.MaxCores*100)
 		}
 
-		if p.conf.MaxRamInGb > 0 {
-			req.Config["limits.memory"] = fmt.Sprintf("%dGiB", p.conf.MaxRamInGb)
+		if p.conf.Incus.MaxRamInGb > 0 {
+			req.Config["limits.memory"] = fmt.Sprintf("%dGiB", p.conf.Incus.MaxRamInGb)
 		}
 
 		op, err := p.c.CreateInstance(req)
@@ -137,7 +137,7 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 					"--agent",
 					fmt.Sprintf("%s-%d", hostname, idx),
 					"--pool",
-					p.conf.Azure.Pool,
+					p.conf.Name,
 					"--url",
 					p.conf.Azure.Url,
 				},
@@ -158,9 +158,9 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 	}()
 
 	if createErr == nil {
-		agentsCreatedMetric.WithLabelValues(p.conf.NamePrefix).Inc()
+		agentsCreatedMetric.WithLabelValues(p.conf.Name).Inc()
 	} else {
-		agentsCreatedErrorMetric.WithLabelValues(p.conf.NamePrefix).Inc()
+		agentsCreatedErrorMetric.WithLabelValues(p.conf.Name).Inc()
 	}
 
 	return createErr
@@ -268,7 +268,7 @@ func (p *Pool) Reap(ctx context.Context) error {
 
 		// Skip if container is too young
 		age := now.Sub(instance.CreatedAt)
-		if age < p.conf.StartupGracePeriod {
+		if age < p.conf.Incus.StartupGracePeriod {
 			p.logger.Debug("reaper: skipping instance",
 				"reason", "age < grace period",
 				"age", age,
@@ -309,9 +309,9 @@ func (p *Pool) Reap(ctx context.Context) error {
 
 		if err != nil {
 			p.logger.Error("reaper: failed to reap", "idx", idx, "err", err)
-			agentsReapedErrorMetric.WithLabelValues(p.conf.NamePrefix).Inc()
+			agentsReapedErrorMetric.WithLabelValues(p.conf.Name).Inc()
 		} else {
-			agentsReapedMetric.WithLabelValues(p.conf.NamePrefix).Inc()
+			agentsReapedMetric.WithLabelValues(p.conf.Name).Inc()
 		}
 	}
 
@@ -399,7 +399,7 @@ func (p *Pool) AgentIndex(name string) int {
 }
 
 func (p *Pool) AgentName(idx int) string {
-	return fmt.Sprintf("%s-%d", p.conf.NamePrefix, idx)
+	return fmt.Sprintf("%s-%d", p.conf.Name, idx)
 }
 
 func (p *Pool) AgentLogs(idx int, w io.Writer) error {
@@ -425,9 +425,9 @@ func (p *Pool) AgentLogs(idx int, w io.Writer) error {
 }
 
 func (p *Pool) Name() string {
-	return p.conf.NamePrefix
+	return p.conf.Name
 }
 
 func (p *Pool) Project() string {
-	return p.conf.ProjectName
+	return p.conf.Incus.ProjectName
 }

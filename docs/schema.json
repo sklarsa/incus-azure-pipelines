@@ -46,10 +46,6 @@
           "type": "string",
           "description": "PAT is an Azure Devops personal access token used for registering the agents"
         },
-        "pool": {
-          "type": "string",
-          "description": "Pool is the pool name for the agent to join"
-        },
         "url": {
           "type": "string",
           "description": "Url of the server. For example: https://dev.azure.com/myorganization or http://my-azure-devops-server:8080/tfs"
@@ -59,20 +55,39 @@
       "type": "object",
       "required": [
         "pat",
-        "pool",
         "url"
       ]
     },
     "PoolConfig": {
       "properties": {
-        "projectName": {
-          "type": "string",
-          "description": "ProjectName is the name of the incus project used for Azure Pipelines Agent runners"
-        },
         "agentCount": {
           "type": "integer",
           "description": "AgentCount is the number of agents to run on this node"
         },
+        "azure": {
+          "$ref": "#/$defs/PoolAzureConfig",
+          "description": "Azure specific settings"
+        },
+        "incus": {
+          "$ref": "#/$defs/PoolIncusConfig",
+          "description": "Incus specific settings"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name is the name of the Azure Devops pool to run agents for.\nThis is also used to name running containers."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "agentCount",
+        "azure",
+        "incus",
+        "name"
+      ]
+    },
+    "PoolIncusConfig": {
+      "properties": {
         "maxCores": {
           "type": "integer",
           "description": "MaxCores specifies the max number of cores that each agent can use. Used to set limits.cpu.allowance\nfor percentage-based soft limits"
@@ -85,13 +100,9 @@
           "type": "integer",
           "description": "TmpfsSizeInGb specifies the maximum size of the tmpfs directory mounted to /tmp in each agent container"
         },
-        "azure": {
-          "$ref": "#/$defs/PoolAzureConfig",
-          "description": "Azure specific settings"
-        },
-        "namePrefix": {
+        "projectName": {
           "type": "string",
-          "description": "NamePrefix is the prefix used for naming agent containers"
+          "description": "ProjectName is the name of the incus project used for Azure Pipelines Agent runners"
         },
         "image": {
           "type": "string",
@@ -105,9 +116,6 @@
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "projectName",
-        "azure",
-        "namePrefix",
         "image"
       ]
     }

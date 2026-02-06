@@ -15,13 +15,14 @@ import (
 
 func testConfig() Config {
 	return Config{
-		NamePrefix: "azp-agent",
-		Image:      "test-image",
+		Name:       "azp-agent",
 		AgentCount: 3,
 		Azure: AzureConfig{
-			PAT:  "test-token",
-			Pool: "default",
-			Url:  "https://dev.azure.com/myorg",
+			PAT: "test-token",
+			Url: "https://dev.azure.com/myorg",
+		},
+		Incus: IncusConfig{
+			Image: "test-image",
 		},
 	}
 }
@@ -39,7 +40,7 @@ func TestNewPool(t *testing.T) {
 func TestNewPool_InvalidRegexp(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	conf := testConfig()
-	conf.NamePrefix = "[invalid"
+	conf.Name = "[invalid"
 
 	_, err := NewPool(m, conf)
 	assert.Error(t, err)
@@ -154,9 +155,9 @@ func TestPool_Reconcile_Error(t *testing.T) {
 func TestPool_Create(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	conf := testConfig()
-	conf.TmpfsSizeInGb = 12
-	conf.MaxCores = 4
-	conf.MaxRamInGb = 8
+	conf.Incus.TmpfsSizeInGb = 12
+	conf.Incus.MaxCores = 4
+	conf.Incus.MaxRamInGb = 8
 
 	op := mocks.NewMockOperation(t)
 	op.On("WaitContext", mock.Anything).Return(nil)
@@ -199,8 +200,8 @@ func TestPool_Create_Error(t *testing.T) {
 func TestPool_Create_NoCpuLimitWhenZero(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	conf := testConfig()
-	conf.MaxCores = 0
-	conf.MaxRamInGb = 0
+	conf.Incus.MaxCores = 0
+	conf.Incus.MaxRamInGb = 0
 
 	op := mocks.NewMockOperation(t)
 	op.On("WaitContext", mock.Anything).Return(nil)
@@ -264,7 +265,7 @@ func TestPool_AgentIndex(t *testing.T) {
 func TestAgentRe_Matching(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	conf := Config{
-		NamePrefix: "azp-agent",
+		Name: "azp-agent",
 	}
 	pool, err := NewPool(m, conf)
 	require.NoError(t, err)
@@ -439,7 +440,7 @@ func TestPool_Reap_SkipsYoungContainers(t *testing.T) {
 	}, nil)
 
 	conf := testConfig()
-	conf.StartupGracePeriod = 5 * time.Minute
+	conf.Incus.StartupGracePeriod = 5 * time.Minute
 
 	pool, err := NewPool(m, conf)
 	require.NoError(t, err)
@@ -472,7 +473,7 @@ func TestPool_Reap_SkipsRunningAgentProcess(t *testing.T) {
 	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(execOp, nil)
 
 	conf := testConfig()
-	conf.StartupGracePeriod = time.Minute
+	conf.Incus.StartupGracePeriod = time.Minute
 
 	pool, err := NewPool(m, conf)
 	require.NoError(t, err)
@@ -512,7 +513,7 @@ func TestPool_Reap_ReapsStaleAgent(t *testing.T) {
 	}), "").Return(stopOp, nil)
 
 	conf := testConfig()
-	conf.StartupGracePeriod = time.Minute
+	conf.Incus.StartupGracePeriod = time.Minute
 
 	pool, err := NewPool(m, conf)
 	require.NoError(t, err)
@@ -544,7 +545,7 @@ func TestPool_Reap_SkipsInFlight(t *testing.T) {
 	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(execOp, nil)
 
 	conf := testConfig()
-	conf.StartupGracePeriod = time.Minute
+	conf.Incus.StartupGracePeriod = time.Minute
 
 	pool, err := NewPool(m, conf)
 	require.NoError(t, err)

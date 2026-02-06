@@ -20,3 +20,11 @@ jobs:
       - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.7.2
+
+      - name: check schema is up to date
+        run: |
+          make schema
+          git diff --exit-code schema.json
+
+      - name: test
+        run: make test

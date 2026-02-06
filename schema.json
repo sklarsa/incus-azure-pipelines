@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sklarsa/incus-azure-pipelines/config-schema.json",
+  "$ref": "#/$defs/CmdCLIConfig",
+  "$defs": {
+    "CmdCLIConfig": {
+      "properties": {
+        "pools": {
+          "items": {
+            "$ref": "#/$defs/PoolConfig"
+          },
+          "type": "array",
+          "description": "Pools is the list of agent pools to manage."
+        },
+        "metricsPort": {
+          "type": "integer",
+          "description": "MetricsPort is the port number that serves Prometheus metrics. Default: 9922"
+        },
+        "daemon": {
+          "$ref": "#/$defs/DaemonConfig",
+          "description": "Daemon contains settings for the background daemon processes."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "pools",
+        "metricsPort",
+        "daemon"
+      ],
+      "description": "CLIConfig is the top-level configuration for the daemon."
+    },
+    "DaemonConfig": {
+      "properties": {
+        "reaperInterval": {
+          "type": "integer",
+          "description": "ReaperInterval is how often to check for and clean up stale agents. Default: 30s"
+        },
+        "reconcileInterval": {
+          "type": "integer",
+          "description": "ReconcileInterval is how often to reconcile expected vs actual agent count. Default: 5s"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "reaperInterval",
+        "reconcileInterval"
+      ],
+      "description": "Config contains settings for daemon background processes."
+    },
+    "PoolAzureConfig": {
+      "properties": {
+        "pat": {
+          "type": "string",
+          "description": "PAT is an Azure Devops personal access token used for registering the agents"
+        },
+        "pool": {
+          "type": "string",
+          "description": "Pool is the pool name for the agent to join"
+        },
+        "url": {
+          "type": "string",
+          "description": "Url of the server. For example: https://dev.azure.com/myorganization or http://my-azure-devops-server:8080/tfs"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "pat",
+        "pool",
+        "url"
+      ]
+    },
+    "PoolConfig": {
+      "properties": {
+        "projectName": {
+          "type": "string",
+          "description": "ProjectName is the name of the incus project used for Azure Pipelines Agent runners"
+        },
+        "agentCount": {
+          "type": "integer",
+          "description": "AgentCount is the number of agents to run on this node"
+        },
+        "maxCores": {
+          "type": "integer",
+          "description": "MaxCores specifies the max number of cores that each agent can use. Used to set limits.cpu.allowance\nfor percentage-based soft limits"
+        },
+        "maxRamInGb": {
+          "type": "integer",
+          "description": "MaxRamInGb specifies the max amount of RAM that each agent can use"
+        },
+        "tmpfsSizeInGb": {
+          "type": "integer",
+          "description": "TmpfsSizeInGb specifies the maximum size of the tmpfs directory mounted to /tmp in each agent container"
+        },
+        "azure": {
+          "$ref": "#/$defs/PoolAzureConfig",
+          "description": "Azure specific settings"
+        },
+        "namePrefix": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string"
+        },
+        "startupGracePeriod": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "projectName",
+        "agentCount",
+        "maxCores",
+        "maxRamInGb",
+        "tmpfsSizeInGb",
+        "azure",
+        "namePrefix",
+        "image",
+        "startupGracePeriod"
+      ]
+    }
+  },
+  "title": "incus-azure-pipelines configuration",
+  "description": "Configuration file schema for incus-azure-pipelines daemon"
+}

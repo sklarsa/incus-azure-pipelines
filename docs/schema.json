@@ -23,11 +23,6 @@
       },
       "additionalProperties": false,
       "type": "object",
-      "required": [
-        "pools",
-        "metricsPort",
-        "daemon"
-      ],
       "description": "CLIConfig is the top-level configuration for the daemon."
     },
     "DaemonConfig": {
@@ -43,10 +38,6 @@
       },
       "additionalProperties": false,
       "type": "object",
-      "required": [
-        "reaperInterval",
-        "reconcileInterval"
-      ],
       "description": "Config contains settings for daemon background processes."
     },
     "PoolAzureConfig": {
@@ -99,27 +90,25 @@
           "description": "Azure specific settings"
         },
         "namePrefix": {
-          "type": "string"
+          "type": "string",
+          "description": "NamePrefix is the prefix used for naming agent containers"
         },
         "image": {
-          "type": "string"
+          "type": "string",
+          "description": "Image is the Incus image alias to use for agent containers"
         },
         "startupGracePeriod": {
-          "type": "integer"
+          "type": "integer",
+          "description": "StartupGracePeriod is how long to wait before considering an agent stale"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
         "projectName",
-        "agentCount",
-        "maxCores",
-        "maxRamInGb",
-        "tmpfsSizeInGb",
         "azure",
         "namePrefix",
-        "image",
-        "startupGracePeriod"
+        "image"
       ]
     }
   },

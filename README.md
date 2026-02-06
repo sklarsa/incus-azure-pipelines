@@ -48,9 +48,9 @@ I also recommend creating a separate Incus project for your pipeline runners to 
 
 ### Configure
 
-Once you're finished with your Incus setup, it's time get cooking with this software. 
+Once you're finished with your Incus setup, it's time get cooking with this software.
 
-First, you need to craft a config file:
+First, you need to craft a config file. See the [configuration schema](https://sklarsa.github.io/incus-azure-pipelines/schema.json) for all available options.
 
 ```yaml
 ---

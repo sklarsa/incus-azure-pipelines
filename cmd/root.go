@@ -28,6 +28,18 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&logLevel, "log-level", "l", "info", "log level (debug, info, warn, error)")
 }
 
+func loadConfig(cmd *cobra.Command, args []string) error {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("error reading config at %s: %w", configPath, err)
+	}
+	conf, err = parseConfig(data)
+	if err != nil {
+		return fmt.Errorf("error parsing config at %s: %w", configPath, err)
+	}
+	return nil
+}
+
 var rootCmd = &cobra.Command{
 	Use:           "incus-azure-pipelines",
 	Short:         "Run Azure Pipelines Agents powered by Incus",
@@ -59,16 +71,7 @@ var rootCmd = &cobra.Command{
 			cancel()
 		}()
 
-		data, err := os.ReadFile(configPath)
-		if err != nil {
-			return fmt.Errorf("error reading config at %s: %w", configPath, err)
-		}
-
-		conf, err = parseConfig(data)
-		if err != nil {
-			return fmt.Errorf("error parsing config at %s: %w", configPath, err)
-		}
-
+		var err error
 		c, err = incus.ConnectIncusUnix("", nil)
 		if err != nil {
 			return err

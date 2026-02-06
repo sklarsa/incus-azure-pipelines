@@ -19,7 +19,8 @@ func init() {
 }
 
 var runCmd = &cobra.Command{
-	Use: "run",
+	Use:     "run",
+	PreRunE: loadConfig,
 	Run: func(cmd *cobra.Command, args []string) {
 		wg := &sync.WaitGroup{}
 

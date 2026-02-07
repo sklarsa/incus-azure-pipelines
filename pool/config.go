@@ -1,6 +1,14 @@
 package pool
 
-import "time"
+import (
+	"fmt"
+	"time"
+
+	"github.com/zalando/go-keyring"
+)
+
+// KeyringService is the service name used for storing PATs in the system keyring.
+const KeyringService = "incus-azure-pipelines"
 
 type Config struct {
 	// AgentCount is the number of agents to run on this node
@@ -35,8 +43,21 @@ type IncusConfig struct {
 }
 
 type AzureConfig struct {
-	// PAT is an Azure Devops personal access token used for registering the agents
-	PAT string `json:"pat" validate:"required"`
+	// PAT is an Azure Devops personal access token used for registering the agents.
+	// If omitted, the PAT is read from the system keyring (see "set-token" command).
+	PAT string `json:"pat,omitempty"`
 	// Url of the server. For example: https://dev.azure.com/myorganization or http://my-azure-devops-server:8080/tfs
 	Url string `json:"url" validate:"required,url"`
+}
+
+// ResolvePAT returns the PAT from the config file, falling back to the system keyring.
+func (a AzureConfig) ResolvePAT(poolName string) (string, error) {
+	if a.PAT != "" {
+		return a.PAT, nil
+	}
+	secret, err := keyring.Get(KeyringService, poolName)
+	if err != nil {
+		return "", fmt.Errorf("no PAT found for pool %q: set azure.pat in config or run 'incus-azure-pipelines set-token %s'", poolName, poolName)
+	}
+	return secret, nil
 }

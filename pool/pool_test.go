@@ -280,7 +280,8 @@ func TestPool_AgentIndex(t *testing.T) {
 func TestAgentRe_Matching(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	conf := Config{
-		Name: "azp-agent",
+		Name:  "azp-agent",
+		Azure: AzureConfig{PAT: "test-token"},
 	}
 	pool, err := NewPool(m, conf)
 	require.NoError(t, err)

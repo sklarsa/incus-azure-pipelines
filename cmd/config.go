@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -37,7 +38,15 @@ func parseConfig(data []byte) (CLIConfig, error) {
 	}
 
 	v := validator.New(validator.WithRequiredStructEnabled())
+	if err := v.Struct(config); err != nil {
+		return config, err
+	}
 
-	return config, v.Struct(config)
+	for _, p := range config.Pools {
+		if _, err := p.Azure.ResolvePAT(p.Name); err != nil {
+			return config, fmt.Errorf("pool %q: %w", p.Name, err)
+		}
+	}
 
+	return config, nil
 }

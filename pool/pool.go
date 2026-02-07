@@ -23,23 +23,29 @@ import (
 type Pool struct {
 	c        incus.InstanceServer
 	conf     Config
+	pat      string
 	agentRe  *regexp.Regexp
 	inFlight *sync.Map
 	logger   *slog.Logger
 }
 
 func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
+	pat, err := conf.Azure.ResolvePAT(conf.Name)
+	if err != nil {
+		return nil, err
+	}
+
 	if conf.Incus.ProjectName != "" {
 		c = c.UseProject(conf.Incus.ProjectName)
 	}
 	p := &Pool{
 		c:        c,
 		conf:     conf,
+		pat:      pat,
 		inFlight: &sync.Map{},
 		logger:   slog.With("pool", conf.Name, "project", conf.Incus.ProjectName),
 	}
 
-	var err error
 	p.agentRe, err = regexp.Compile("^" + conf.Name + `-(\d+)$`)
 	if err != nil {
 		return nil, fmt.Errorf("unable to construct agent regexp from Name %q: %w", conf.Name, err)
@@ -115,7 +121,7 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 		}
 
 		if err = p.c.CreateInstanceFile(req.Name, "/home/agent/.token", incus.InstanceFileArgs{
-			Content:   strings.NewReader(p.conf.Azure.PAT),
+			Content:   strings.NewReader(p.pat),
 			WriteMode: "overwrite",
 			Mode:      400,
 			UID:       int64(provision.AgentUid),

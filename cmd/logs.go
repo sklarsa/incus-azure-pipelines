@@ -38,7 +38,7 @@ var logsCmd = &cobra.Command{
 					return err
 				}
 
-				return p.AgentLogs(idx, os.Stdout)
+				return p.AgentLogs(ctx, idx, os.Stdout)
 			}
 
 		}

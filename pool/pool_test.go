@@ -594,7 +594,7 @@ func TestPool_AgentLogs_InvalidIndex(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = pool.AgentLogs(10, &buf) // Pool has 3 agents (0, 1, 2)
+	err = pool.AgentLogs(context.Background(), 10, &buf) // Pool has 3 agents (0, 1, 2)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid agent index 10")
 }
@@ -607,7 +607,7 @@ func TestPool_AgentLogs_ExecError(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = pool.AgentLogs(0, &buf)
+	err = pool.AgentLogs(context.Background(), 0, &buf)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "instance not found")
 }
@@ -616,14 +616,14 @@ func TestPool_AgentLogs_Success(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 
 	execOp := mocks.NewMockOperation(t)
-	execOp.On("Wait").Return(nil)
+	execOp.On("WaitContext", mock.Anything).Return(nil)
 	m.On("ExecInstance", "azp-agent-1", mock.Anything, mock.Anything).Return(execOp, nil)
 
 	pool, err := NewPool(m, testConfig())
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = pool.AgentLogs(1, &buf)
+	err = pool.AgentLogs(context.Background(), 1, &buf)
 	require.NoError(t, err)
 }
 
@@ -631,14 +631,14 @@ func TestPool_AgentLogs_WaitError(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 
 	execOp := mocks.NewMockOperation(t)
-	execOp.On("Wait").Return(fmt.Errorf("wait failed"))
+	execOp.On("WaitContext", mock.Anything).Return(fmt.Errorf("wait failed"))
 	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(execOp, nil)
 
 	pool, err := NewPool(m, testConfig())
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = pool.AgentLogs(0, &buf)
+	err = pool.AgentLogs(context.Background(), 0, &buf)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "wait failed")
 }
@@ -670,4 +670,31 @@ func TestPool_Create_WithAgentPrefix(t *testing.T) {
 
 	err = pool.CreateAgent(context.Background(), 0)
 	require.NoError(t, err)
+}
+
+func TestWaitOp_Timeout(t *testing.T) {
+	op := mocks.NewMockOperation(t)
+	op.On("WaitContext", mock.Anything).Run(func(args mock.Arguments) {
+		ctx := args.Get(0).(context.Context)
+		<-ctx.Done()
+	}).Return(context.DeadlineExceeded)
+
+	err := waitOp(context.Background(), op, 50*time.Millisecond)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "operation timed out after 50ms")
+}
+
+func TestWaitOp_ParentCancellation(t *testing.T) {
+	op := mocks.NewMockOperation(t)
+	op.On("WaitContext", mock.Anything).Run(func(args mock.Arguments) {
+		ctx := args.Get(0).(context.Context)
+		<-ctx.Done()
+	}).Return(context.Canceled)
+
+	parentCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := waitOp(parentCtx, op, 10*time.Second)
+	assert.Error(t, err)
+	assert.NotContains(t, err.Error(), "operation timed out")
 }

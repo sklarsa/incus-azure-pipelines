@@ -20,6 +20,19 @@ import (
 	"github.com/sklarsa/incus-azure-pipelines/provision"
 )
 
+// defaultOperationTimeout is the default timeout for Incus operations.
+const defaultOperationTimeout = 30 * time.Second
+
+func waitOp(ctx context.Context, op incus.Operation, timeout time.Duration) error {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	err := op.WaitContext(timeoutCtx)
+	if err != nil && timeoutCtx.Err() != nil && ctx.Err() == nil {
+		return fmt.Errorf("operation timed out after %s: %w", timeout, err)
+	}
+	return err
+}
+
 type Pool struct {
 	c        incus.InstanceServer
 	conf     Config
@@ -110,7 +123,7 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 			return err
 		}
 
-		if err = op.WaitContext(ctx); err != nil {
+		if err = waitOp(ctx, op, 2*time.Minute); err != nil {
 			return err
 		}
 
@@ -159,7 +172,7 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 			return err
 		}
 
-		return op.WaitContext(ctx)
+		return waitOp(ctx, op, defaultOperationTimeout)
 
 	}()
 
@@ -345,7 +358,7 @@ func (p *Pool) isAgentProcessRunning(ctx context.Context, idx int) (bool, error)
 		return false, fmt.Errorf("exec failed: %w", err)
 	}
 
-	if err := op.WaitContext(ctx); err != nil {
+	if err := waitOp(ctx, op, defaultOperationTimeout); err != nil {
 		return false, fmt.Errorf("wait failed: %w", err)
 	}
 
@@ -377,7 +390,7 @@ func (p *Pool) reapInstance(ctx context.Context, idx int) error {
 		return err
 	}
 
-	if err := op.WaitContext(ctx); err != nil {
+	if err := waitOp(ctx, op, 45*time.Second); err != nil {
 		if api.StatusErrorCheck(err, http.StatusNotFound) {
 			return nil
 		}
@@ -410,7 +423,7 @@ func (p *Pool) AgentName(idx int) string {
 	return fmt.Sprintf("%s-%d", p.conf.Name, idx)
 }
 
-func (p *Pool) AgentLogs(idx int, w io.Writer) error {
+func (p *Pool) AgentLogs(ctx context.Context, idx int, w io.Writer) error {
 
 	if idx >= p.conf.AgentCount {
 		return fmt.Errorf("invalid agent index %d, pool %q has %d agents", idx, p.Name(), p.conf.AgentCount)
@@ -429,7 +442,7 @@ func (p *Pool) AgentLogs(idx int, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return op.Wait()
+	return waitOp(ctx, op, defaultOperationTimeout)
 }
 
 func (p *Pool) Name() string {

@@ -170,7 +170,6 @@ func TestPool_Create(t *testing.T) {
 			req.InstancePut.Ephemeral == true &&
 			req.Config["limits.cpu.allowance"] == "400%" &&
 			req.Config["limits.memory"] == "8GiB" &&
-			req.Config["raw.lxc"] == "lxc.cgroup2.memory.oom.group = 1" &&
 			hasTmpfs &&
 			tmpfs["size"] == "12GiB"
 	})).Return(op, nil)

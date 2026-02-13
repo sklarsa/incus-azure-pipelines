@@ -101,6 +101,7 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 			InstancePut: api.InstancePut{
 				Config: map[string]string{
 					"boot.host_shutdown_action": "force-stop",
+					"raw.lxc":                  "lxc.cgroup2.memory.oom.group = 1",
 				},
 				Ephemeral: true,
 				Devices:   map[string]map[string]string{},
@@ -113,10 +114,6 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 
 		if p.conf.Incus.MaxRamInGb > 0 {
 			req.Config["limits.memory"] = fmt.Sprintf("%dGiB", p.conf.Incus.MaxRamInGb)
-		}
-
-		if p.conf.Incus.OOMGroupKill {
-			req.Config["raw.lxc"] = "lxc.cgroup2.memory.oom.group = 1"
 		}
 
 		if p.conf.Incus.TmpfsSizeInGb > 0 {

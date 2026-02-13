@@ -170,6 +170,7 @@ func TestPool_Create(t *testing.T) {
 			req.InstancePut.Ephemeral == true &&
 			req.Config["limits.cpu.allowance"] == "400%" &&
 			req.Config["limits.memory"] == "8GiB" &&
+			req.Config["raw.lxc"] == "lxc.cgroup2.memory.oom.group = 1" &&
 			hasTmpfs &&
 			tmpfs["size"] == "12GiB"
 	})).Return(op, nil)
@@ -790,57 +791,6 @@ func TestPool_Create_WithAgentPrefix(t *testing.T) {
 		}
 		return false
 	}), mock.Anything).Return(execOp, nil)
-
-	pool, err := NewPool(m, conf)
-	require.NoError(t, err)
-
-	err = pool.CreateAgent(context.Background(), 0)
-	require.NoError(t, err)
-}
-
-func TestPool_Create_OOMGroupKill(t *testing.T) {
-	m := mocks.NewMockInstanceServer(t)
-	conf := testConfig()
-	conf.Incus.OOMGroupKill = true
-
-	op := mocks.NewMockOperation(t)
-	op.On("WaitContext", mock.Anything).Return(nil)
-
-	m.On("CreateInstance", mock.MatchedBy(func(req api.InstancesPost) bool {
-		return req.Config["raw.lxc"] == "lxc.cgroup2.memory.oom.group = 1"
-	})).Return(op, nil)
-
-	m.On("CreateInstanceFile", mock.Anything, mock.Anything, mock.Anything).Return(nil)
-
-	execOp := mocks.NewMockOperation(t)
-	execOp.On("WaitContext", mock.Anything).Return(nil)
-	m.On("ExecInstance", mock.Anything, mock.Anything, mock.Anything).Return(execOp, nil)
-
-	pool, err := NewPool(m, conf)
-	require.NoError(t, err)
-
-	err = pool.CreateAgent(context.Background(), 0)
-	require.NoError(t, err)
-}
-
-func TestPool_Create_OOMGroupKill_Disabled(t *testing.T) {
-	m := mocks.NewMockInstanceServer(t)
-	conf := testConfig()
-	conf.Incus.OOMGroupKill = false
-
-	op := mocks.NewMockOperation(t)
-	op.On("WaitContext", mock.Anything).Return(nil)
-
-	m.On("CreateInstance", mock.MatchedBy(func(req api.InstancesPost) bool {
-		_, hasRawLxc := req.Config["raw.lxc"]
-		return !hasRawLxc
-	})).Return(op, nil)
-
-	m.On("CreateInstanceFile", mock.Anything, mock.Anything, mock.Anything).Return(nil)
-
-	execOp := mocks.NewMockOperation(t)
-	execOp.On("WaitContext", mock.Anything).Return(nil)
-	m.On("ExecInstance", mock.Anything, mock.Anything, mock.Anything).Return(execOp, nil)
 
 	pool, err := NewPool(m, conf)
 	require.NoError(t, err)

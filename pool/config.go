@@ -32,11 +32,6 @@ type IncusConfig struct {
 	Image string `json:"image" validate:"required"`
 	// StartupGracePeriod is how long to wait before considering an agent stale
 	StartupGracePeriod time.Duration `json:"startupGracePeriod,omitempty"`
-	// OOMGroupKill enables cgroup2 memory.oom.group on containers, causing the
-	// entire container to be killed atomically on OOM instead of just one process.
-	// This prevents partially-alive containers from thrashing I/O during memory
-	// pressure and taking down the whole host.
-	OOMGroupKill bool `json:"oomGroupKill,omitempty"`
 }
 
 type AzureConfig struct {

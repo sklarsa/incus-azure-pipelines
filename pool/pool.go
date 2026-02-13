@@ -95,6 +95,7 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 			InstancePut: api.InstancePut{
 				Config: map[string]string{
 					"boot.host_shutdown_action": "force-stop",
+					"raw.lxc":                   "lxc.cgroup2.memory.oom.group = 1",
 				},
 				Ephemeral: true,
 				Devices:   map[string]map[string]string{},

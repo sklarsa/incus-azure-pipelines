@@ -134,6 +134,10 @@
         "startupGracePeriod": {
           "type": "integer",
           "description": "StartupGracePeriod is how long to wait before considering an agent stale"
+        },
+        "oomGroupKill": {
+          "type": "boolean",
+          "description": "OOMGroupKill enables cgroup2 memory.oom.group on containers, causing the\nentire container to be killed atomically on OOM instead of just one process.\nThis prevents partially-alive containers from thrashing I/O during memory\npressure and taking down the whole host."
         }
       },
       "additionalProperties": false,

@@ -170,6 +170,7 @@ func TestPool_Create(t *testing.T) {
 			req.InstancePut.Ephemeral == true &&
 			req.Config["limits.cpu.allowance"] == "400%" &&
 			req.Config["limits.memory"] == "8GiB" &&
+			req.Config["raw.lxc"] == "lxc.cgroup2.memory.oom.group = 1" &&
 			hasTmpfs &&
 			tmpfs["size"] == "12GiB"
 	})).Return(op, nil)
@@ -605,9 +606,11 @@ func TestPool_Reap_HealthCheckFailure_BelowThreshold(t *testing.T) {
 	m.AssertNotCalled(t, "UpdateInstanceState", mock.Anything, mock.Anything, mock.Anything)
 
 	// Verify failure count was incremented
-	val, ok := pool.healthFailures.Load(0)
+	pool.mu.Lock()
+	val, ok := pool.healthFailures[0]
+	pool.mu.Unlock()
 	require.True(t, ok)
-	assert.Equal(t, 1, val.(int))
+	assert.Equal(t, 1, val)
 }
 
 func TestPool_Reap_HealthCheckFailure_ReachesThreshold(t *testing.T) {
@@ -624,8 +627,12 @@ func TestPool_Reap_HealthCheckFailure_ReachesThreshold(t *testing.T) {
 		},
 	}
 
-	// We need to create a fresh mock for each Reap call because
-	// the mock tracks call counts
+	// Use a single pool across all iterations to prove accumulation works.
+	// We create a fresh mock per iteration because mocks track call counts.
+	m := mocks.NewMockInstanceServer(t)
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
 	for i := range maxHealthCheckFailures {
 		m := mocks.NewMockInstanceServer(t)
 		m.On("GetInstancesFull", api.InstanceTypeContainer).Return(instances, nil)
@@ -643,21 +650,27 @@ func TestPool_Reap_HealthCheckFailure_ReachesThreshold(t *testing.T) {
 			}), "").Return(stopOp, nil)
 		}
 
-		pool, err := NewPool(m, conf)
-		require.NoError(t, err)
-
-		// Pre-load the failure count from previous iterations
-		if i > 0 {
-			pool.healthFailures.Store(0, i)
-		}
+		// Swap the Incus client on the same pool to use the fresh mock
+		pool.c = m
 
 		err = pool.Reap(context.Background())
 		require.NoError(t, err)
 
 		if i < maxHealthCheckFailures-1 {
 			m.AssertNotCalled(t, "UpdateInstanceState", mock.Anything, mock.Anything, mock.Anything)
+
+			// Verify failure count accumulated correctly
+			pool.mu.Lock()
+			assert.Equal(t, i+1, pool.healthFailures[0])
+			pool.mu.Unlock()
 		} else {
 			m.AssertCalled(t, "UpdateInstanceState", "azp-agent-0", mock.Anything, "")
+
+			// Verify healthFailures was cleaned up after force-reap
+			pool.mu.Lock()
+			_, exists := pool.healthFailures[0]
+			pool.mu.Unlock()
+			assert.False(t, exists, "healthFailures should be cleaned up after force-reap")
 		}
 	}
 }
@@ -689,16 +702,67 @@ func TestPool_Reap_HealthCheckFailure_ResetsOnSuccess(t *testing.T) {
 	require.NoError(t, err)
 
 	// Pre-load some failures
-	pool.healthFailures.Store(0, 3)
+	pool.mu.Lock()
+	pool.healthFailures[0] = 3
+	pool.mu.Unlock()
 
 	err = pool.Reap(context.Background())
 	require.NoError(t, err)
 
 	// Failure count should be cleared
-	_, ok := pool.healthFailures.Load(0)
+	pool.mu.Lock()
+	_, ok := pool.healthFailures[0]
+	pool.mu.Unlock()
 	assert.False(t, ok)
 
 	m.AssertNotCalled(t, "UpdateInstanceState", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestPool_Reap_HealthCheckFailure_CleansUpStaleEntries(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	// Return only agent-1; agent-0 has disappeared
+	m.On("GetInstancesFull", api.InstanceTypeContainer).Return([]api.InstanceFull{
+		{
+			Instance: api.Instance{
+				Name:      "azp-agent-1",
+				CreatedAt: time.Now().Add(-10 * time.Minute),
+			},
+			State: &api.InstanceState{Status: "Running"},
+		},
+	}, nil)
+
+	// pgrep returns 0 (process found — healthy)
+	execOp := mocks.NewMockOperation(t)
+	execOp.On("WaitContext", mock.Anything).Return(nil)
+	execOp.On("Get").Return(api.Operation{
+		Metadata: map[string]any{"return": float64(0)},
+	})
+	m.On("ExecInstance", "azp-agent-1", mock.Anything, mock.Anything).Return(execOp, nil)
+
+	conf := testConfig()
+	conf.Incus.StartupGracePeriod = time.Minute
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	// Pre-load stale failures for a container that no longer exists
+	pool.mu.Lock()
+	pool.healthFailures[0] = 3
+	pool.healthFailures[1] = 2
+	pool.mu.Unlock()
+
+	err = pool.Reap(context.Background())
+	require.NoError(t, err)
+
+	// agent-0 entry should be swept (container gone)
+	pool.mu.Lock()
+	_, hasZero := pool.healthFailures[0]
+	// agent-1 entry should also be cleared (healthy check succeeded)
+	_, hasOne := pool.healthFailures[1]
+	pool.mu.Unlock()
+
+	assert.False(t, hasZero, "stale healthFailures entry for disappeared container should be removed")
+	assert.False(t, hasOne, "healthFailures entry should be cleared on successful health check")
 }
 
 func TestPool_Reap_ListError(t *testing.T) {

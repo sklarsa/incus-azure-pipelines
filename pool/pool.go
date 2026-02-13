@@ -42,7 +42,8 @@ type Pool struct {
 	conf           Config
 	agentRe        *regexp.Regexp
 	inFlight       *sync.Map
-	healthFailures *sync.Map // map[int]int — consecutive health check failures per agent index
+	mu             sync.Mutex
+	healthFailures map[int]int // consecutive health check failures per agent index
 	logger         *slog.Logger
 }
 
@@ -54,7 +55,7 @@ func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
 		c:              c,
 		conf:           conf,
 		inFlight:       &sync.Map{},
-		healthFailures: &sync.Map{},
+		healthFailures: make(map[int]int),
 		logger:         slog.With("pool", conf.Name, "project", conf.Incus.ProjectName),
 	}
 
@@ -101,6 +102,7 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 			InstancePut: api.InstancePut{
 				Config: map[string]string{
 					"boot.host_shutdown_action": "force-stop",
+					"raw.lxc":                  "lxc.cgroup2.memory.oom.group = 1",
 				},
 				Ephemeral: true,
 				Devices:   map[string]map[string]string{},
@@ -266,12 +268,14 @@ func (p *Pool) Reap(ctx context.Context) error {
 		return err
 	}
 
+	seen := make(map[int]struct{}, len(instances))
 	for _, instance := range instances {
 
 		idx, err := p.agentIndex(instance.Name)
 		if err != nil {
 			continue
 		}
+		seen[idx] = struct{}{}
 
 		// Skip if container is not running
 		if instance.State == nil {
@@ -305,9 +309,10 @@ func (p *Pool) Reap(ctx context.Context) error {
 		// Check if agent process is running
 		running, err := p.isAgentProcessRunning(ctx, idx)
 		if err != nil {
-			prev, _ := p.healthFailures.LoadOrStore(idx, 0)
-			failures := prev.(int) + 1
-			p.healthFailures.Store(idx, failures)
+			p.mu.Lock()
+			p.healthFailures[idx]++
+			failures := p.healthFailures[idx]
+			p.mu.Unlock()
 
 			if failures < maxHealthCheckFailures {
 				p.logger.Warn("reaper: health check failed",
@@ -327,15 +332,15 @@ func (p *Pool) Reap(ctx context.Context) error {
 			agentsForceReapedMetric.WithLabelValues(p.conf.Name).Inc()
 			// Fall through to reap
 		} else if running {
-			p.healthFailures.Delete(idx)
+			p.mu.Lock()
+			delete(p.healthFailures, idx)
+			p.mu.Unlock()
 			p.logger.Debug("reaper: skipping instance",
 				"reason", "agent process is running",
 				"age", age,
 				"idx", idx,
 			)
 			continue
-		} else {
-			p.healthFailures.Delete(idx)
 		}
 
 		if _, exists := p.inFlight.LoadOrStore(idx, true); exists {
@@ -351,7 +356,10 @@ func (p *Pool) Reap(ctx context.Context) error {
 
 		err = p.reapInstance(ctx, idx)
 		p.inFlight.Delete(idx)
-		p.healthFailures.Delete(idx)
+
+		p.mu.Lock()
+		delete(p.healthFailures, idx)
+		p.mu.Unlock()
 
 		if err != nil {
 			p.logger.Error("reaper: failed to reap", "idx", idx, "err", err)
@@ -360,6 +368,15 @@ func (p *Pool) Reap(ctx context.Context) error {
 			agentsReapedMetric.WithLabelValues(p.conf.Name).Inc()
 		}
 	}
+
+	// Remove stale healthFailures entries for indices no longer in the instance list.
+	p.mu.Lock()
+	for idx := range p.healthFailures {
+		if _, exists := seen[idx]; !exists {
+			delete(p.healthFailures, idx)
+		}
+	}
+	p.mu.Unlock()
 
 	return nil
 

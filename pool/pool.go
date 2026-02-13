@@ -33,17 +33,12 @@ func waitOp(ctx context.Context, op incus.Operation, timeout time.Duration) erro
 	return err
 }
 
-// maxHealthCheckFailures is the number of consecutive health check failures
-// before the reaper force-reaps an unresponsive container.
-const maxHealthCheckFailures = 5
-
 type Pool struct {
-	c              incus.InstanceServer
-	conf           Config
-	agentRe        *regexp.Regexp
-	inFlight       *sync.Map
-	healthFailures *sync.Map // map[int]int — consecutive health check failures per agent index
-	logger         *slog.Logger
+	c        incus.InstanceServer
+	conf     Config
+	agentRe  *regexp.Regexp
+	inFlight *sync.Map
+	logger   *slog.Logger
 }
 
 func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
@@ -51,11 +46,10 @@ func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
 		c = c.UseProject(conf.Incus.ProjectName)
 	}
 	p := &Pool{
-		c:              c,
-		conf:           conf,
-		inFlight:       &sync.Map{},
-		healthFailures: &sync.Map{},
-		logger:         slog.With("pool", conf.Name, "project", conf.Incus.ProjectName),
+		c:        c,
+		conf:     conf,
+		inFlight: &sync.Map{},
+		logger:   slog.With("pool", conf.Name, "project", conf.Incus.ProjectName),
 	}
 
 	var err error
@@ -306,37 +300,17 @@ func (p *Pool) Reap(ctx context.Context) error {
 		// Check if agent process is running
 		running, err := p.isAgentProcessRunning(ctx, idx)
 		if err != nil {
-			prev, _ := p.healthFailures.LoadOrStore(idx, 0)
-			failures := prev.(int) + 1
-			p.healthFailures.Store(idx, failures)
+			p.logger.Warn("reaper: health check failed", "idx", idx, "err", err)
+			continue
+		}
 
-			if failures < maxHealthCheckFailures {
-				p.logger.Warn("reaper: health check failed",
-					"idx", idx,
-					"failures", failures,
-					"threshold", maxHealthCheckFailures,
-					"err", err,
-				)
-				continue
-			}
-
-			p.logger.Warn("reaper: health check failed repeatedly, force-reaping",
-				"idx", idx,
-				"failures", failures,
-				"err", err,
-			)
-			agentsForceReapedMetric.WithLabelValues(p.conf.Name).Inc()
-			// Fall through to reap
-		} else if running {
-			p.healthFailures.Delete(idx)
+		if running {
 			p.logger.Debug("reaper: skipping instance",
 				"reason", "agent process is running",
 				"age", age,
 				"idx", idx,
 			)
 			continue
-		} else {
-			p.healthFailures.Delete(idx)
 		}
 
 		if _, exists := p.inFlight.LoadOrStore(idx, true); exists {
@@ -352,7 +326,6 @@ func (p *Pool) Reap(ctx context.Context) error {
 
 		err = p.reapInstance(ctx, idx)
 		p.inFlight.Delete(idx)
-		p.healthFailures.Delete(idx)
 
 		if err != nil {
 			p.logger.Error("reaper: failed to reap", "idx", idx, "err", err)

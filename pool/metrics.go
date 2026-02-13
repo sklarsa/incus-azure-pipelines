@@ -96,3 +96,11 @@ var agentsReapedErrorMetric = promauto.NewCounterVec(
 	},
 	[]string{"pool"},
 )
+
+var agentsForceReapedMetric = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "iap_agents_force_reaped",
+		Help: "Count of agents force-reaped due to repeated health check failures",
+	},
+	[]string{"pool"},
+)

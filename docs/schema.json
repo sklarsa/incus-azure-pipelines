@@ -95,6 +95,13 @@
           "$ref": "#/$defs/PoolIncusConfig",
           "description": "Incus specific settings"
         },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Env is a map of environment variables to set when running the agent."
+        },
         "name": {
           "type": "string",
           "description": "Name is the name of the Azure Devops pool to run agents for.\nThis is also used to name running containers."

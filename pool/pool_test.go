@@ -673,6 +673,58 @@ func TestPool_Create_WithAgentPrefix(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestPool_Create_WithEnv(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+	conf.Env = map[string]string{
+		"VSTS_HTTP_TIMEOUT": "300",
+		"VSTS_HTTP_RETRY":   "3",
+	}
+
+	op := mocks.NewMockOperation(t)
+	op.On("WaitContext", mock.Anything).Return(nil)
+
+	m.On("CreateInstance", mock.Anything).Return(op, nil)
+	m.On("CreateInstanceFile", "azp-agent-0", "/home/agent/.token", mock.Anything).Return(nil)
+
+	execOp := mocks.NewMockOperation(t)
+	execOp.On("WaitContext", mock.Anything).Return(nil)
+	m.On("ExecInstance", "azp-agent-0", mock.MatchedBy(func(req api.InstanceExecPost) bool {
+		return req.Environment["VSTS_HTTP_TIMEOUT"] == "300" &&
+			req.Environment["VSTS_HTTP_RETRY"] == "3"
+	}), mock.Anything).Return(execOp, nil)
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	err = pool.CreateAgent(context.Background(), 0)
+	require.NoError(t, err)
+}
+
+func TestPool_Create_WithoutEnv(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+	// No env set
+
+	op := mocks.NewMockOperation(t)
+	op.On("WaitContext", mock.Anything).Return(nil)
+
+	m.On("CreateInstance", mock.Anything).Return(op, nil)
+	m.On("CreateInstanceFile", "azp-agent-0", "/home/agent/.token", mock.Anything).Return(nil)
+
+	execOp := mocks.NewMockOperation(t)
+	execOp.On("WaitContext", mock.Anything).Return(nil)
+	m.On("ExecInstance", "azp-agent-0", mock.MatchedBy(func(req api.InstanceExecPost) bool {
+		return len(req.Environment) == 0
+	}), mock.Anything).Return(execOp, nil)
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	err = pool.CreateAgent(context.Background(), 0)
+	require.NoError(t, err)
+}
+
 func TestWaitOp_Timeout(t *testing.T) {
 	op := mocks.NewMockOperation(t)
 	op.On("WaitContext", mock.Anything).Run(func(args mock.Arguments) {

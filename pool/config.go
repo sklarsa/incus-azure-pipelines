@@ -13,6 +13,8 @@ type Config struct {
 	Azure AzureConfig `json:"azure" validate:"required"`
 	// Incus specific settings
 	Incus IncusConfig `json:"incus" validate:"required"`
+	// Env is a map of environment variables to set when running the agent.
+	Env map[string]string `json:"env,omitempty"`
 	// Name is the name of the Azure Devops pool to run agents for.
 	// This is also used to name running containers.
 	Name string `json:"name" validate:"required,hostname"`

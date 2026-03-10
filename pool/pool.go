@@ -147,25 +147,31 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 			}
 		}
 
+		execPost := api.InstanceExecPost{
+			Command: []string{
+				"setsid",
+				"--fork",
+				"/home/agent/run_agent.sh",
+				"--agent",
+				fmt.Sprintf("%s-%d", agentPrefix, idx),
+				"--pool",
+				p.conf.Name,
+				"--url",
+				p.conf.Azure.Url,
+			},
+			Interactive: false,
+			WaitForWS:   true,
+			User:        provision.AgentUid,
+			Group:       provision.AgentGid,
+		}
+
+		if len(p.conf.Env) > 0 {
+			execPost.Environment = p.conf.Env
+		}
+
 		op, err = p.c.ExecInstance(
 			req.Name,
-			api.InstanceExecPost{
-				Command: []string{
-					"setsid",
-					"--fork",
-					"/home/agent/run_agent.sh",
-					"--agent",
-					fmt.Sprintf("%s-%d", agentPrefix, idx),
-					"--pool",
-					p.conf.Name,
-					"--url",
-					p.conf.Azure.Url,
-				},
-				Interactive: false,
-				WaitForWS:   true,
-				User:        provision.AgentUid,
-				Group:       provision.AgentGid,
-			},
+			execPost,
 			&incus.InstanceExecArgs{},
 		)
 

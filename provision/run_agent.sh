@@ -1,8 +1,16 @@
 #!/bin/bash
 set -uo pipefail
 
+if [ "$(id -u)" == "0" ]; then
+    exec sudo -H -u agent "$0" "$@"
+fi
+
 LOG_FILE="${LOG_FILE:-/home/agent/azp-agent.log}"
 exec >> "$LOG_FILE" 2>&1
+
+echo "uid=$(id -u)"
+echo "gid=$(id -g)"
+echo "groups=$(id -Gn)"
 
 export HOME=/home/agent
 cd "${HOME}"

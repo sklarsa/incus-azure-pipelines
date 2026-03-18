@@ -64,12 +64,15 @@ var rootCmd = &cobra.Command{
 			Level: level,
 		})))
 
+		// Set up global cancellation
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		go func() {
 			<-sigCh
 			cancel()
 		}()
+
+		slog.Info("loaded config", "path", configPath)
 
 		var err error
 		c, err = incus.ConnectIncusUnix("", nil)

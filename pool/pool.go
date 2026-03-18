@@ -44,7 +44,11 @@ type Pool struct {
 func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
 	if conf.Incus.ProjectName != "" {
 		c = c.UseProject(conf.Incus.ProjectName)
+		slog.Info("using project", "name", conf.Incus.ProjectName)
+	} else {
+		slog.Info("using default project")
 	}
+
 	p := &Pool{
 		c:        c,
 		conf:     conf,
@@ -152,17 +156,12 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 				"setsid",
 				"--fork",
 				"/home/agent/run_agent.sh",
-				"--agent",
-				fmt.Sprintf("%s-%d", agentPrefix, idx),
-				"--pool",
-				p.conf.Name,
-				"--url",
-				p.conf.Azure.Url,
+				"--agent", fmt.Sprintf("%s-%d", agentPrefix, idx),
+				"--pool", p.conf.Name,
+				"--url", p.conf.Azure.Url,
 			},
 			Interactive: false,
 			WaitForWS:   true,
-			User:        provision.AgentUid,
-			Group:       provision.AgentGid,
 		}
 
 		if len(p.conf.Env) > 0 {

@@ -41,6 +41,9 @@ var runAgentScript string
 func BaseImage(ctx context.Context, c incus.InstanceServer, conf Config) error {
 	if conf.ProjectName != "" {
 		c = c.UseProject(conf.ProjectName)
+		slog.Info("using project", "name", conf.ProjectName)
+	} else {
+		slog.Info("using default project")
 	}
 
 	// First check that all provisioning scripts exist

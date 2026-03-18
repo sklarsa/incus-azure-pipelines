@@ -100,6 +100,7 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 				Config: map[string]string{
 					"boot.host_shutdown_action": "force-stop",
 					"raw.lxc":                   "lxc.cgroup2.memory.oom.group = 1",
+					"security.nesting":          "true",
 				},
 				Ephemeral: true,
 				Devices:   map[string]map[string]string{},

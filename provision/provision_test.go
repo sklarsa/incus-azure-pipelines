@@ -39,6 +39,9 @@ func TestRandomString(t *testing.T) {
 	})
 }
 
+// TestWaitCleanupOpIgnoresParentCancellation covers the deferred cleanup path in
+// BaseImage, where teardown must still wait for stop/delete operations after the
+// main request context has already been canceled.
 func TestWaitCleanupOpIgnoresParentCancellation(t *testing.T) {
 	type ctxKey string
 

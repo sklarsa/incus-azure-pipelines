@@ -13,9 +13,9 @@ import (
 // Config contains settings for daemon background processes.
 type Config struct {
 	// ReaperInterval is how often to check for and clean up stale agents. Default: 30s
-	ReaperInterval time.Duration `json:"reaperInterval,omitempty"`
+	ReaperInterval time.Duration `json:"reaperInterval,omitempty" default:"30s"`
 	// ReconcileInterval is how often to reconcile expected vs actual agent count. Default: 5s
-	ReconcileInterval time.Duration `json:"reconcileInterval,omitempty"`
+	ReconcileInterval time.Duration `json:"reconcileInterval,omitempty" default:"5s"`
 	// Listener contains settings for the event listener.
 	Listener ListenerConfig `json:"listener,omitempty"`
 }
@@ -23,9 +23,9 @@ type Config struct {
 // ListenerConfig contains settings for event listener retry behavior.
 type ListenerConfig struct {
 	// RetryDelay is the initial delay between retries. Default: 1s
-	RetryDelay time.Duration `json:"retryDelay,omitempty"`
+	RetryDelay time.Duration `json:"retryDelay,omitempty" default:"1s"`
 	// MaxRetryDelay is the maximum delay between retries. Default: 1m
-	MaxRetryDelay time.Duration `json:"maxRetryDelay,omitempty"`
+	MaxRetryDelay time.Duration `json:"maxRetryDelay,omitempty" default:"1m"`
 }
 
 func Run(ctx context.Context, p *pool.Pool, conf Config) {

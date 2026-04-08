@@ -4,6 +4,7 @@ go 1.25.4
 
 require (
 	github.com/avast/retry-go/v4 v4.7.0
+	github.com/creasty/defaults v1.8.0
 	github.com/go-playground/validator/v10 v10.28.0
 	github.com/goccy/go-yaml v1.19.0
 	github.com/gorilla/websocket v1.5.3

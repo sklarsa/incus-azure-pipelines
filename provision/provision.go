@@ -21,9 +21,10 @@ import (
 )
 
 const (
-	AgentUid  uint32 = 1100
-	AgentGid  uint32 = 1100
-	AgentUser        = "agent"
+	AgentUid                uint32 = 1100
+	AgentGid                uint32 = 1100
+	AgentUser                      = "agent"
+	builderCleanupOpTimeout        = 2 * time.Minute
 )
 
 type Config struct {
@@ -37,6 +38,13 @@ type Config struct {
 
 //go:embed run_agent.sh
 var runAgentScript string
+
+func waitCleanupOp(ctx context.Context, op incus.Operation) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), builderCleanupOpTimeout)
+	defer cancel()
+
+	return op.WaitContext(cleanupCtx)
+}
 
 func BaseImage(ctx context.Context, c incus.InstanceServer, conf Config) error {
 	if conf.ProjectName != "" {
@@ -84,6 +92,29 @@ func BaseImage(ctx context.Context, c incus.InstanceServer, conf Config) error {
 	if err = op.WaitContext(ctx); err != nil {
 		return err
 	}
+
+	// Ensure the builder instance is cleaned up on any subsequent failure.
+	defer func() {
+		stopOp, err := c.UpdateInstanceState(req.Name, api.InstanceStatePut{
+			Action:  "stop",
+			Force:   true,
+			Timeout: -1,
+		}, "")
+		if err == nil {
+			if err := waitCleanupOp(ctx, stopOp); err != nil {
+				slog.Error("error stopping builder instance", "instance", req.Name, "err", err)
+			}
+		}
+
+		delOp, err := c.DeleteInstance(req.Name)
+		if err != nil {
+			slog.Error("error deleting", "instance", req.Name, "err", err)
+			return
+		}
+		if err = waitCleanupOp(ctx, delOp); err != nil {
+			slog.Error("error deleting", "instance", req.Name, "err", err)
+		}
+	}()
 
 	i, etag, err := c.GetInstance(req.Name)
 	if err != nil {
@@ -200,21 +231,6 @@ su - "${AGENT_USER}" -c "
 	if err := op.WaitContext(ctx); err != nil {
 		return err
 	}
-
-	defer func() {
-
-		op, err := c.DeleteInstance(i.Name)
-		if err != nil {
-			slog.Error("error deleting", "instance", i.Name, "err", err)
-			return
-		}
-
-		if err = op.WaitContext(ctx); err != nil {
-			slog.Error("error deleting", "instance", i.Name, "err", err)
-			return
-		}
-
-	}()
 
 	// Publish the image
 	slog.Info("publishing image", "instance", i.Name, "target", conf.TargetAlias)

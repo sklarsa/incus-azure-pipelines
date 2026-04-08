@@ -1,9 +1,13 @@
 package provision
 
 import (
+	"context"
 	"testing"
+	"time"
 
+	"github.com/sklarsa/incus-azure-pipelines/mocks"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,4 +37,35 @@ func TestRandomString(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEqual(t, a, b)
 	})
+}
+
+func TestWaitCleanupOpIgnoresParentCancellation(t *testing.T) {
+	type ctxKey string
+
+	const key ctxKey = "key"
+
+	parentCtx, cancel := context.WithCancel(context.WithValue(context.Background(), key, "value"))
+	cancel()
+
+	op := mocks.NewMockOperation(t)
+	op.On("WaitContext", mock.MatchedBy(func(ctx context.Context) bool {
+		if got := ctx.Value(key); got != "value" {
+			return false
+		}
+
+		if ctx.Err() != nil {
+			return false
+		}
+
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			return false
+		}
+
+		remaining := time.Until(deadline)
+		return remaining > 0 && remaining <= builderCleanupOpTimeout
+	})).Return(nil).Once()
+
+	err := waitCleanupOp(parentCtx, op)
+	require.NoError(t, err)
 }

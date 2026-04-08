@@ -51,7 +51,7 @@ func (p *Pool) ListenForDeletes(ctx context.Context, agentsToCreate chan<- int) 
 	}()
 	defer l.Disconnect()
 
-	h, err := l.AddHandler(nil, handlerFunc)
+	h, err := l.AddHandler([]string{"operation"}, handlerFunc)
 	if err != nil {
 		return err
 	}

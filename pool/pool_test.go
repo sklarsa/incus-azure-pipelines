@@ -821,6 +821,66 @@ func TestPool_WaitForAgent_RetriesUntilReady(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestNewPool_DefaultGracePeriod_Container(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig() // VM false, grace unset
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+	assert.Equal(t, time.Minute, pool.conf.Incus.StartupGracePeriod)
+}
+
+func TestNewPool_DefaultGracePeriod_VM(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+	conf.Incus.VM = true
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+	assert.Equal(t, 5*time.Minute, pool.conf.Incus.StartupGracePeriod)
+}
+
+func TestNewPool_ExplicitGracePeriodRespected(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+	conf.Incus.VM = true
+	conf.Incus.StartupGracePeriod = 90 * time.Second
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+	assert.Equal(t, 90*time.Second, pool.conf.Incus.StartupGracePeriod)
+}
+
+func TestPool_Reap_VM_UsesLongerStopTimeout(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstancesFull", api.InstanceTypeVM).Return([]api.InstanceFull{
+		{
+			Instance: api.Instance{Name: "azp-agent-0", CreatedAt: time.Now().Add(-10 * time.Minute)},
+			State:    &api.InstanceState{Status: "Running"},
+		},
+	}, nil)
+
+	// pgrep returns 1 (agent process not found) -> stale
+	execOp := mocks.NewMockOperation(t)
+	execOp.On("WaitContext", mock.Anything).Return(nil)
+	execOp.On("Get").Return(api.Operation{Metadata: map[string]any{"return": float64(1)}})
+	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(execOp, nil)
+
+	stopOp := mocks.NewMockOperation(t)
+	stopOp.On("WaitContext", mock.Anything).Return(nil)
+	m.On("UpdateInstanceState", "azp-agent-0", mock.MatchedBy(func(req api.InstanceStatePut) bool {
+		return req.Action == "stop" && req.Force && req.Timeout == 60
+	}), "").Return(stopOp, nil)
+
+	conf := testConfig()
+	conf.Incus.VM = true
+	conf.Incus.StartupGracePeriod = time.Minute
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	err = pool.Reap(context.Background())
+	require.NoError(t, err)
+	m.AssertCalled(t, "UpdateInstanceState", "azp-agent-0", mock.Anything, "")
+}
+
 func TestWaitOp_Timeout(t *testing.T) {
 	op := mocks.NewMockOperation(t)
 	op.On("WaitContext", mock.Anything).Run(func(args mock.Arguments) {

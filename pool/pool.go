@@ -66,6 +66,14 @@ func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
 		return nil, fmt.Errorf("unable to construct agent regexp from Name %q: %w", conf.Name, err)
 	}
 
+	if p.conf.Incus.StartupGracePeriod == 0 {
+		if p.conf.Incus.VM {
+			p.conf.Incus.StartupGracePeriod = 5 * time.Minute
+		} else {
+			p.conf.Incus.StartupGracePeriod = time.Minute
+		}
+	}
+
 	err = prometheus.DefaultRegisterer.Register(newAgentUptimeCollector(p))
 	var are prometheus.AlreadyRegisteredError
 	if errors.As(err, &are) {
@@ -409,10 +417,17 @@ func (p *Pool) isAgentProcessRunning(ctx context.Context, idx int) (bool, error)
 func (p *Pool) reapInstance(ctx context.Context, idx int) error {
 	name := p.AgentName(idx)
 
+	stopTimeout := 30
+	waitTimeout := 45 * time.Second
+	if p.conf.Incus.VM {
+		stopTimeout = 60
+		waitTimeout = 90 * time.Second
+	}
+
 	op, err := p.c.UpdateInstanceState(name, api.InstanceStatePut{
 		Action:  "stop",
 		Force:   true,
-		Timeout: 30,
+		Timeout: stopTimeout,
 	}, "")
 	if err != nil {
 		if api.StatusErrorCheck(err, http.StatusNotFound) {
@@ -421,7 +436,7 @@ func (p *Pool) reapInstance(ctx context.Context, idx int) error {
 		return err
 	}
 
-	if err := waitOp(ctx, op, 45*time.Second); err != nil {
+	if err := waitOp(ctx, op, waitTimeout); err != nil {
 		if api.StatusErrorCheck(err, http.StatusNotFound) {
 			return nil
 		}

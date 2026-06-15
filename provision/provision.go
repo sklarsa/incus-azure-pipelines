@@ -103,12 +103,6 @@ func BaseImage(ctx context.Context, c incus.InstanceServer, conf Config) error {
 		return err
 	}
 
-	if conf.VM {
-		if err := waitBuilderAgent(ctx, c, req.Name, 3*time.Minute, 2*time.Second); err != nil {
-			return err
-		}
-	}
-
 	// Ensure the builder instance is cleaned up on any subsequent failure.
 	defer func() {
 		stopOp, err := c.UpdateInstanceState(req.Name, api.InstanceStatePut{
@@ -131,6 +125,12 @@ func BaseImage(ctx context.Context, c incus.InstanceServer, conf Config) error {
 			slog.Error("error deleting", "instance", req.Name, "err", err)
 		}
 	}()
+
+	if conf.VM {
+		if err := waitBuilderAgent(ctx, c, req.Name, 3*time.Minute, 2*time.Second); err != nil {
+			return err
+		}
+	}
 
 	i, etag, err := c.GetInstance(req.Name)
 	if err != nil {

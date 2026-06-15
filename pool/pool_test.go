@@ -525,7 +525,7 @@ func TestPool_Reap_ReapsStaleAgent(t *testing.T) {
 	stopOp := mocks.NewMockOperation(t)
 	stopOp.On("WaitContext", mock.Anything).Return(nil)
 	m.On("UpdateInstanceState", "azp-agent-0", mock.MatchedBy(func(req api.InstanceStatePut) bool {
-		return req.Action == "stop" && req.Force == true
+		return req.Action == "stop" && req.Force == true && req.Timeout == 30
 	}), "").Return(stopOp, nil)
 
 	conf := testConfig()
@@ -864,7 +864,10 @@ func TestPool_Reap_VM_UsesLongerStopTimeout(t *testing.T) {
 	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(execOp, nil)
 
 	stopOp := mocks.NewMockOperation(t)
-	stopOp.On("WaitContext", mock.Anything).Return(nil)
+	stopOp.On("WaitContext", mock.MatchedBy(func(ctx context.Context) bool {
+		d, ok := ctx.Deadline()
+		return ok && time.Until(d) > 80*time.Second
+	})).Return(nil)
 	m.On("UpdateInstanceState", "azp-agent-0", mock.MatchedBy(func(req api.InstanceStatePut) bool {
 		return req.Action == "stop" && req.Force && req.Timeout == 60
 	}), "").Return(stopOp, nil)

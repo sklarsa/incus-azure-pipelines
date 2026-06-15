@@ -417,6 +417,7 @@ func (p *Pool) isAgentProcessRunning(ctx context.Context, idx int) (bool, error)
 func (p *Pool) reapInstance(ctx context.Context, idx int) error {
 	name := p.AgentName(idx)
 
+	// waitTimeout must exceed stopTimeout so the client-side context doesn't cancel before Incus reports completion.
 	stopTimeout := 30
 	waitTimeout := 45 * time.Second
 	if p.conf.Incus.VM {

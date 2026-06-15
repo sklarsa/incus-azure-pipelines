@@ -799,6 +799,28 @@ func TestPool_ListFull_VM(t *testing.T) {
 	assert.Len(t, agents, 1)
 }
 
+func TestPool_WaitForAgent_RetriesUntilReady(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+	conf.Incus.VM = true
+
+	// First probe fails (agent not up), second succeeds.
+	failOp := mocks.NewMockOperation(t)
+	failOp.On("WaitContext", mock.Anything).Return(fmt.Errorf("VM agent isn't currently running"))
+	okOp := mocks.NewMockOperation(t)
+	okOp.On("WaitContext", mock.Anything).Return(nil)
+	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).
+		Return(failOp, nil).Once()
+	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).
+		Return(okOp, nil).Once()
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	err = pool.waitForAgent(context.Background(), "azp-agent-0", 5*time.Second, time.Millisecond)
+	require.NoError(t, err)
+}
+
 func TestWaitOp_Timeout(t *testing.T) {
 	op := mocks.NewMockOperation(t)
 	op.On("WaitContext", mock.Anything).Run(func(args mock.Arguments) {

@@ -151,6 +151,12 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 			return err
 		}
 
+		if p.conf.Incus.VM {
+			if err = p.waitForAgent(ctx, req.Name, 3*time.Minute, 2*time.Second); err != nil {
+				return err
+			}
+		}
+
 		if err = p.c.CreateInstanceFile(req.Name, "/home/agent/.token", incus.InstanceFileArgs{
 			Content:   strings.NewReader(p.conf.Azure.PAT),
 			WriteMode: "overwrite",
@@ -446,6 +452,38 @@ func (p *Pool) agentIndex(name string) (int, error) {
 
 func (p *Pool) AgentName(idx int) string {
 	return fmt.Sprintf("%s-%d", p.conf.Name, idx)
+}
+
+// waitForAgent polls a trivial exec until the guest agent responds, up to timeout.
+// VMs need their incus-agent running before file push / exec; containers are ready
+// immediately so callers should only invoke this for VM pools.
+func (p *Pool) waitForAgent(ctx context.Context, name string, timeout, interval time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		op, err := p.c.ExecInstance(name, api.InstanceExecPost{
+			Command:     []string{"true"},
+			WaitForWS:   true,
+			Interactive: false,
+		}, &incus.InstanceExecArgs{})
+		if err == nil {
+			if werr := op.WaitContext(ctx); werr == nil {
+				return nil
+			} else {
+				lastErr = werr
+			}
+		} else {
+			lastErr = err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("agent on %q not ready after %s: %w", name, timeout, lastErr)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+	}
 }
 
 // instanceType returns the Incus instance type for this pool's agents.

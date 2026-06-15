@@ -120,7 +120,7 @@
       "properties": {
         "maxCores": {
           "type": "integer",
-          "description": "MaxCores specifies the max number of cores that each agent can use. Used to set limits.cpu.allowance\nfor percentage-based soft limits"
+          "description": "MaxCores specifies the max number of cores that each agent can use. For container pools it sets\nlimits.cpu.allowance as a percentage-based soft limit; for VM pools it sets limits.cpu as a hard\nvCPU count."
         },
         "maxRamInGb": {
           "type": "integer",
@@ -137,6 +137,18 @@
         "image": {
           "type": "string",
           "description": "Image is the Incus image alias to use for agent containers"
+        },
+        "vm": {
+          "type": "boolean",
+          "description": "VM, when true, runs agents as Incus virtual machines instead of system\ncontainers. VMs have their own kernel, so nested Docker/kind work without\nLXC hacks. Default: false (container)."
+        },
+        "diskSizeInGb": {
+          "type": "integer",
+          "description": "DiskSizeInGb sets the VM root disk size. Ignored for container pools\n(containers share the host filesystem). Recommended for VM pools."
+        },
+        "storagePool": {
+          "type": "string",
+          "description": "StoragePool is the Incus storage pool used to size the VM root disk.\nOnly used when VM and DiskSizeInGb are set. Default: \"default\"."
         },
         "startupGracePeriod": {
           "type": "integer",

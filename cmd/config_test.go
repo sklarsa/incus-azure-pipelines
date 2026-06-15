@@ -318,6 +318,23 @@ pools:
 	assert.Equal(t, 0, config.Pools[0].Incus.DiskSizeInGb)
 }
 
+func TestParseConfig_StoragePoolDefault(t *testing.T) {
+	yaml := `
+pools:
+  - name: my-pool
+    agentCount: 1
+    azure:
+      pat: "token"
+      url: "https://dev.azure.com/org"
+    incus:
+      image: "img"
+      vm: true
+`
+	config, err := parseConfig([]byte(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, "default", config.Pools[0].Incus.StoragePool)
+}
+
 func TestParseConfig_EmptyInput(t *testing.T) {
 	// Empty input resets defaults due to YAML unmarshalling behavior
 	config, err := parseConfig([]byte(""))

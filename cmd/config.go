@@ -30,6 +30,12 @@ func parseConfig(data []byte) (CLIConfig, error) {
 		return config, err
 	}
 
+	for i := range config.Pools {
+		if config.Pools[i].Incus.StoragePool == "" {
+			config.Pools[i].Incus.StoragePool = "default"
+		}
+	}
+
 	v := validator.New(validator.WithRequiredStructEnabled())
 
 	return config, v.Struct(config)

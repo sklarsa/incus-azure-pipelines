@@ -725,6 +725,45 @@ func TestPool_Create_WithoutEnv(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestPool_Create_VM(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+	conf.Incus.VM = true
+	conf.Incus.MaxCores = 4
+	conf.Incus.MaxRamInGb = 8
+	conf.Incus.DiskSizeInGb = 50
+	conf.Incus.TmpfsSizeInGb = 12 // must be ignored for VMs
+
+	op := mocks.NewMockOperation(t)
+	op.On("WaitContext", mock.Anything).Return(nil)
+
+	m.On("CreateInstance", mock.MatchedBy(func(req api.InstancesPost) bool {
+		_, hasRawLxc := req.Config["raw.lxc"]
+		_, hasNesting := req.Config["security.nesting"]
+		_, hasAllowance := req.Config["limits.cpu.allowance"]
+		_, hasTmpfs := req.Devices["tmpfs"]
+		root, hasRoot := req.Devices["root"]
+		return req.Name == "azp-agent-0" &&
+			req.Type == api.InstanceTypeVM &&
+			!hasRawLxc && !hasNesting && !hasAllowance && !hasTmpfs &&
+			req.Config["limits.cpu"] == "4" &&
+			req.Config["limits.memory"] == "8GiB" &&
+			hasRoot && root["size"] == "50GiB" && root["type"] == "disk"
+	})).Return(op, nil)
+
+	m.On("CreateInstanceFile", "azp-agent-0", "/home/agent/.token", mock.Anything).Return(nil)
+
+	execOp := mocks.NewMockOperation(t)
+	execOp.On("WaitContext", mock.Anything).Return(nil)
+	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(execOp, nil)
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	err = pool.CreateAgent(context.Background(), 0)
+	require.NoError(t, err)
+}
+
 func TestPool_List_VM(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	m.On("GetInstances", api.InstanceTypeVM).Return([]api.Instance{

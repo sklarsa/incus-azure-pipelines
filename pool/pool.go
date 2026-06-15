@@ -90,7 +90,7 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 
 		req := api.InstancesPost{
 			Name: p.AgentName(idx),
-			Type: api.InstanceTypeContainer,
+			Type: p.instanceType(),
 			Source: api.InstanceSource{
 				Alias: p.conf.Incus.Image,
 				Type:  "image",
@@ -99,29 +99,46 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 			InstancePut: api.InstancePut{
 				Config: map[string]string{
 					"boot.host_shutdown_action": "force-stop",
-					"raw.lxc":                   "lxc.cgroup2.memory.oom.group = 1",
-					"security.nesting":          "true",
 				},
 				Ephemeral: true,
 				Devices:   map[string]map[string]string{},
 			},
 		}
 
-		if p.conf.Incus.MaxCores > 0 {
-			req.Config["limits.cpu.allowance"] = fmt.Sprintf("%d%%", p.conf.Incus.MaxCores*100)
+		if p.conf.Incus.VM {
+			// VMs have their own kernel; container-only keys are invalid/unneeded.
+			if p.conf.Incus.MaxCores > 0 {
+				req.Config["limits.cpu"] = fmt.Sprintf("%d", p.conf.Incus.MaxCores)
+			}
+			if p.conf.Incus.DiskSizeInGb > 0 {
+				req.Devices["root"] = map[string]string{
+					"type": "disk",
+					"path": "/",
+					"pool": p.conf.Incus.StoragePool,
+					"size": fmt.Sprintf("%dGiB", p.conf.Incus.DiskSizeInGb),
+				}
+			}
+			if p.conf.Incus.TmpfsSizeInGb > 0 {
+				p.logger.Warn("ignoring tmpfsSizeInGb for VM pool (not supported for VMs)")
+			}
+		} else {
+			req.Config["raw.lxc"] = "lxc.cgroup2.memory.oom.group = 1"
+			req.Config["security.nesting"] = "true"
+			if p.conf.Incus.MaxCores > 0 {
+				req.Config["limits.cpu.allowance"] = fmt.Sprintf("%d%%", p.conf.Incus.MaxCores*100)
+			}
+			if p.conf.Incus.TmpfsSizeInGb > 0 {
+				req.Devices["tmpfs"] = map[string]string{
+					"type":   "disk",
+					"source": "tmpfs:",
+					"path":   "/tmp",
+					"size":   fmt.Sprintf("%dGiB", p.conf.Incus.TmpfsSizeInGb),
+				}
+			}
 		}
 
 		if p.conf.Incus.MaxRamInGb > 0 {
 			req.Config["limits.memory"] = fmt.Sprintf("%dGiB", p.conf.Incus.MaxRamInGb)
-		}
-
-		if p.conf.Incus.TmpfsSizeInGb > 0 {
-			req.Devices["tmpfs"] = map[string]string{
-				"type":   "disk",
-				"source": "tmpfs:",
-				"path":   "/tmp",
-				"size":   fmt.Sprintf("%dGiB", p.conf.Incus.TmpfsSizeInGb),
-			}
 		}
 
 		op, err := p.c.CreateInstance(req)

@@ -17,6 +17,7 @@ func init() {
 	provisionCmd.Flags().StringVarP(&provisionConf.TargetAlias, "target", "t", "", "target image alias (name of the newly-built image)")
 	provisionCmd.Flags().StringArrayVarP(&provisionConf.Scripts, "scripts", "s", []string{}, "paths to provisioning scripts")
 	provisionCmd.Flags().StringVarP(&provisionConf.ProjectName, "project", "p", "", "name of incus project to build the image in")
+	provisionCmd.Flags().BoolVar(&provisionConf.VM, "vm", false, "build a virtual-machine image instead of a container image")
 
 	_ = provisionCmd.MarkFlagRequired("base")
 	_ = provisionCmd.MarkFlagRequired("target")

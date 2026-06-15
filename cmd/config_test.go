@@ -282,6 +282,42 @@ pools:
 	assert.Equal(t, 60*time.Second, config.Pools[0].Incus.StartupGracePeriod)
 }
 
+func TestParseConfig_VMSettings(t *testing.T) {
+	yaml := `
+pools:
+  - name: my-pool
+    agentCount: 2
+    azure:
+      pat: "token"
+      url: "https://dev.azure.com/org"
+    incus:
+      image: "vm-agent"
+      vm: true
+      diskSizeInGb: 50
+`
+	config, err := parseConfig([]byte(yaml))
+	require.NoError(t, err)
+	assert.True(t, config.Pools[0].Incus.VM)
+	assert.Equal(t, 50, config.Pools[0].Incus.DiskSizeInGb)
+}
+
+func TestParseConfig_VMDefaultsFalse(t *testing.T) {
+	yaml := `
+pools:
+  - name: my-pool
+    agentCount: 1
+    azure:
+      pat: "token"
+      url: "https://dev.azure.com/org"
+    incus:
+      image: "img"
+`
+	config, err := parseConfig([]byte(yaml))
+	require.NoError(t, err)
+	assert.False(t, config.Pools[0].Incus.VM)
+	assert.Equal(t, 0, config.Pools[0].Incus.DiskSizeInGb)
+}
+
 func TestParseConfig_EmptyInput(t *testing.T) {
 	// Empty input resets defaults due to YAML unmarshalling behavior
 	config, err := parseConfig([]byte(""))

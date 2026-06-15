@@ -32,6 +32,13 @@ type IncusConfig struct {
 	ProjectName string `json:"projectName,omitempty"`
 	// Image is the Incus image alias to use for agent containers
 	Image string `json:"image" validate:"required"`
+	// VM, when true, runs agents as Incus virtual machines instead of system
+	// containers. VMs have their own kernel, so nested Docker/kind work without
+	// LXC hacks. Default: false (container).
+	VM bool `json:"vm,omitempty"`
+	// DiskSizeInGb sets the VM root disk size. Ignored for container pools
+	// (containers share the host filesystem). Recommended for VM pools.
+	DiskSizeInGb int `json:"diskSizeInGb,omitempty" validate:"min=0"`
 	// StartupGracePeriod is how long to wait before considering an agent stale
 	StartupGracePeriod time.Duration `json:"startupGracePeriod,omitempty"`
 }

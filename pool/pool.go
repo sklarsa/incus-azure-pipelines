@@ -200,7 +200,7 @@ func (p *Pool) isAgent(i api.Instance) bool {
 
 func (p *Pool) ListAgents() ([]api.Instance, error) {
 	agents := []api.Instance{}
-	allInstances, err := p.c.GetInstances(api.InstanceTypeContainer)
+	allInstances, err := p.c.GetInstances(p.instanceType())
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ func (p *Pool) ListAgents() ([]api.Instance, error) {
 
 func (p *Pool) ListAgentsFull() ([]api.InstanceFull, error) {
 	agents := []api.InstanceFull{}
-	allInstances, err := p.c.GetInstancesFull(api.InstanceTypeContainer)
+	allInstances, err := p.c.GetInstancesFull(p.instanceType())
 	if err != nil {
 		return nil, err
 	}
@@ -428,6 +428,14 @@ func (p *Pool) agentIndex(name string) (int, error) {
 
 func (p *Pool) AgentName(idx int) string {
 	return fmt.Sprintf("%s-%d", p.conf.Name, idx)
+}
+
+// instanceType returns the Incus instance type for this pool's agents.
+func (p *Pool) instanceType() api.InstanceType {
+	if p.conf.Incus.VM {
+		return api.InstanceTypeVM
+	}
+	return api.InstanceTypeContainer
 }
 
 func (p *Pool) AgentLogs(ctx context.Context, idx int, w io.Writer) error {

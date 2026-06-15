@@ -725,6 +725,40 @@ func TestPool_Create_WithoutEnv(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestPool_List_VM(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstances", api.InstanceTypeVM).Return([]api.Instance{
+		{Name: "azp-agent-0"},
+	}, nil)
+
+	conf := testConfig()
+	conf.Incus.VM = true
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	agents, err := pool.ListAgents()
+	require.NoError(t, err)
+	assert.Len(t, agents, 1)
+}
+
+func TestPool_ListFull_VM(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstancesFull", api.InstanceTypeVM).Return([]api.InstanceFull{
+		{Instance: api.Instance{Name: "azp-agent-0"}},
+	}, nil)
+
+	conf := testConfig()
+	conf.Incus.VM = true
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	agents, err := pool.ListAgentsFull()
+	require.NoError(t, err)
+	assert.Len(t, agents, 1)
+}
+
 func TestWaitOp_Timeout(t *testing.T) {
 	op := mocks.NewMockOperation(t)
 	op.On("WaitContext", mock.Anything).Run(func(args mock.Arguments) {

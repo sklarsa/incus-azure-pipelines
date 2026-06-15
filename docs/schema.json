@@ -128,7 +128,7 @@
         },
         "tmpfsSizeInGb": {
           "type": "integer",
-          "description": "TmpfsSizeInGb specifies the maximum size of the tmpfs directory mounted to /tmp in each agent container"
+          "description": "TmpfsSizeInGb specifies the maximum size of the tmpfs directory mounted to /tmp in each agent container.\nIgnored for VM pools (VMs do not support tmpfs devices)."
         },
         "projectName": {
           "type": "string",
@@ -148,7 +148,7 @@
         },
         "storagePool": {
           "type": "string",
-          "description": "StoragePool is the Incus storage pool used to size the VM root disk.\nOnly used when VM and DiskSizeInGb are set. Default: \"default\"."
+          "description": "StoragePool is the Incus storage pool used to size the VM root disk when DiskSizeInGb is set on a VM pool.\nDefaults to \"default\"."
         },
         "startupGracePeriod": {
           "type": "integer",

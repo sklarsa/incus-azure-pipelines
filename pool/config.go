@@ -27,7 +27,8 @@ type IncusConfig struct {
 	MaxCores int `json:"maxCores,omitempty" validate:"min=0"`
 	// MaxRamInGb specifies the max amount of RAM that each agent can use
 	MaxRamInGb int `json:"maxRamInGb,omitempty" validate:"min=0"`
-	// TmpfsSizeInGb specifies the maximum size of the tmpfs directory mounted to /tmp in each agent container
+	// TmpfsSizeInGb specifies the maximum size of the tmpfs directory mounted to /tmp in each agent container.
+	// Ignored for VM pools (VMs do not support tmpfs devices).
 	TmpfsSizeInGb int `json:"tmpfsSizeInGb,omitempty" validate:"min=0"`
 	// ProjectName is the name of the incus project used for Azure Pipelines Agent runners
 	ProjectName string `json:"projectName,omitempty"`
@@ -40,8 +41,8 @@ type IncusConfig struct {
 	// DiskSizeInGb sets the VM root disk size. Ignored for container pools
 	// (containers share the host filesystem). Recommended for VM pools.
 	DiskSizeInGb int `json:"diskSizeInGb,omitempty" validate:"min=0"`
-	// StoragePool is the Incus storage pool used to size the VM root disk.
-	// Only used when VM and DiskSizeInGb are set. Default: "default".
+	// StoragePool is the Incus storage pool used to size the VM root disk when DiskSizeInGb is set on a VM pool.
+	// Defaults to "default".
 	StoragePool string `json:"storagePool,omitempty"`
 	// StartupGracePeriod is how long to wait before considering an agent stale
 	StartupGracePeriod time.Duration `json:"startupGracePeriod,omitempty"`

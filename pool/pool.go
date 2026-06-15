@@ -473,6 +473,7 @@ func (p *Pool) AgentName(idx int) string {
 // waitForAgent polls a trivial exec until the guest agent responds, up to timeout.
 // VMs need their incus-agent running before file push / exec; containers are ready
 // immediately so callers should only invoke this for VM pools.
+// Near-duplicate of waitBuilderAgent in provision/provision.go — kept separate to avoid a pool<->provision import cycle.
 func (p *Pool) waitForAgent(ctx context.Context, name string, timeout, interval time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
@@ -483,11 +484,13 @@ func (p *Pool) waitForAgent(ctx context.Context, name string, timeout, interval 
 			Interactive: false,
 		}, &incus.InstanceExecArgs{})
 		if err == nil {
-			if werr := op.WaitContext(ctx); werr == nil {
+			attemptCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			werr := op.WaitContext(attemptCtx)
+			cancel()
+			if werr == nil {
 				return nil
-			} else {
-				lastErr = werr
 			}
+			lastErr = werr
 		} else {
 			lastErr = err
 		}

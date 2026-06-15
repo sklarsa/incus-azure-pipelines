@@ -406,6 +406,8 @@ func randomString(n int) (string, error) {
 	return string(b), nil
 }
 
+// waitBuilderAgent polls a trivial exec until the VM guest agent responds, up to timeout.
+// Near-duplicate of waitForAgent in pool/pool.go — kept separate to avoid a pool<->provision import cycle.
 func waitBuilderAgent(ctx context.Context, c incus.InstanceServer, name string, timeout, interval time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
@@ -414,11 +416,13 @@ func waitBuilderAgent(ctx context.Context, c incus.InstanceServer, name string, 
 			Command: []string{"true"}, WaitForWS: true,
 		}, &incus.InstanceExecArgs{})
 		if err == nil {
-			if werr := op.WaitContext(ctx); werr == nil {
+			attemptCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			werr := op.WaitContext(attemptCtx)
+			cancel()
+			if werr == nil {
 				return nil
-			} else {
-				lastErr = werr
 			}
+			lastErr = werr
 		} else {
 			lastErr = err
 		}

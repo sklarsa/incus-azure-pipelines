@@ -56,6 +56,10 @@ func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
 		logger:   slog.With("pool", conf.Name, "project", conf.Incus.ProjectName),
 	}
 
+	if p.conf.Incus.VM && p.conf.Incus.TmpfsSizeInGb > 0 {
+		p.logger.Warn("ignoring tmpfsSizeInGb for VM pool (not supported for VMs)")
+	}
+
 	var err error
 	p.agentRe, err = regexp.Compile("^" + conf.Name + `-(\d+)$`)
 	if err != nil {
@@ -117,9 +121,6 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 					"pool": p.conf.Incus.StoragePool,
 					"size": fmt.Sprintf("%dGiB", p.conf.Incus.DiskSizeInGb),
 				}
-			}
-			if p.conf.Incus.TmpfsSizeInGb > 0 {
-				p.logger.Warn("ignoring tmpfsSizeInGb for VM pool (not supported for VMs)")
 			}
 		} else {
 			req.Config["raw.lxc"] = "lxc.cgroup2.memory.oom.group = 1"

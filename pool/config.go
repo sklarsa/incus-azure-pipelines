@@ -21,8 +21,9 @@ type Config struct {
 }
 
 type IncusConfig struct {
-	// MaxCores specifies the max number of cores that each agent can use. Used to set limits.cpu.allowance
-	// for percentage-based soft limits
+	// MaxCores specifies the max number of cores that each agent can use. For container pools it sets
+	// limits.cpu.allowance as a percentage-based soft limit; for VM pools it sets limits.cpu as a hard
+	// vCPU count.
 	MaxCores int `json:"maxCores,omitempty" validate:"min=0"`
 	// MaxRamInGb specifies the max amount of RAM that each agent can use
 	MaxRamInGb int `json:"maxRamInGb,omitempty" validate:"min=0"`
@@ -41,7 +42,7 @@ type IncusConfig struct {
 	DiskSizeInGb int `json:"diskSizeInGb,omitempty" validate:"min=0"`
 	// StoragePool is the Incus storage pool used to size the VM root disk.
 	// Only used when VM and DiskSizeInGb are set. Default: "default".
-	StoragePool string `json:"storagePool,omitempty" default:"default"`
+	StoragePool string `json:"storagePool,omitempty"`
 	// StartupGracePeriod is how long to wait before considering an agent stale
 	StartupGracePeriod time.Duration `json:"startupGracePeriod,omitempty"`
 }

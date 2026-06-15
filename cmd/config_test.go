@@ -335,6 +335,25 @@ pools:
 	assert.Equal(t, "default", config.Pools[0].Incus.StoragePool)
 }
 
+func TestParseConfig_StoragePoolEmptyStringDefaulted(t *testing.T) {
+	yaml := `
+pools:
+  - name: my-pool
+    agentCount: 1
+    azure:
+      pat: "token"
+      url: "https://dev.azure.com/org"
+    incus:
+      image: "img"
+      storagePool: ""
+`
+	config, err := parseConfig([]byte(yaml))
+	require.NoError(t, err)
+	// Explicit empty string must still be defaulted to "default" by the explicit loop,
+	// since creasty/defaults does not recurse into slice elements.
+	assert.Equal(t, "default", config.Pools[0].Incus.StoragePool)
+}
+
 func TestParseConfig_EmptyInput(t *testing.T) {
 	// Empty input resets defaults due to YAML unmarshalling behavior
 	config, err := parseConfig([]byte(""))

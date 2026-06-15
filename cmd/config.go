@@ -30,6 +30,8 @@ func parseConfig(data []byte) (CLIConfig, error) {
 		return config, err
 	}
 
+	// creasty/defaults does not recurse into slice elements, so per-pool
+	// defaults must be applied explicitly after unmarshal.
 	for i := range config.Pools {
 		if config.Pools[i].Incus.StoragePool == "" {
 			config.Pools[i].Incus.StoragePool = "default"

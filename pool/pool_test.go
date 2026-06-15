@@ -729,6 +729,7 @@ func TestPool_Create_VM(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	conf := testConfig()
 	conf.Incus.VM = true
+	conf.Incus.StoragePool = "default"
 	conf.Incus.MaxCores = 4
 	conf.Incus.MaxRamInGb = 8
 	conf.Incus.DiskSizeInGb = 50
@@ -748,7 +749,7 @@ func TestPool_Create_VM(t *testing.T) {
 			!hasRawLxc && !hasNesting && !hasAllowance && !hasTmpfs &&
 			req.Config["limits.cpu"] == "4" &&
 			req.Config["limits.memory"] == "8GiB" &&
-			hasRoot && root["size"] == "50GiB" && root["type"] == "disk"
+			hasRoot && root["size"] == "50GiB" && root["type"] == "disk" && root["pool"] == "default"
 	})).Return(op, nil)
 
 	m.On("CreateInstanceFile", "azp-agent-0", "/home/agent/.token", mock.Anything).Return(nil)

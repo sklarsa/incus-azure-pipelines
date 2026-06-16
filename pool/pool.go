@@ -44,17 +44,17 @@ type Pool struct {
 func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
 	if conf.Incus.ProjectName != "" {
 		c = c.UseProject(conf.Incus.ProjectName)
-		slog.Info("using project", "name", conf.Incus.ProjectName)
-	} else {
-		slog.Info("using default project")
 	}
 
 	p := &Pool{
 		c:        c,
 		conf:     conf,
 		inFlight: &sync.Map{},
-		logger:   slog.With("pool", conf.Name, "project", conf.Incus.ProjectName),
 	}
+	// Log the effective project ("default" when unset) so it's clear where
+	// instances are created.
+	p.logger = slog.With("pool", conf.Name, "project", p.Project())
+	p.logger.Info("initializing pool", "vm", conf.Incus.VM, "image", conf.Incus.Image)
 
 	if p.conf.Incus.VM && p.conf.Incus.TmpfsSizeInGb > 0 {
 		p.logger.Warn("ignoring tmpfsSizeInGb for VM pool (not supported for VMs)")
@@ -539,6 +539,11 @@ func (p *Pool) Name() string {
 	return p.conf.Name
 }
 
+// Project returns the effective Incus project for this pool ("default" when
+// unset), matching where instances are actually created.
 func (p *Pool) Project() string {
+	if p.conf.Incus.ProjectName == "" {
+		return "default"
+	}
 	return p.conf.Incus.ProjectName
 }

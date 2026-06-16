@@ -66,6 +66,33 @@ func waitCleanupOp(ctx context.Context, op incus.Operation) error {
 	return op.WaitContext(cleanupCtx)
 }
 
+// stopBuilderForCleanup force-stops the builder instance during cleanup. On the
+// success path the instance is already stopped before publishing, so this is a
+// no-op; Incus reports that as a 400 "instance is already stopped" either
+// synchronously or via the returned operation. Both forms are treated as
+// success so they don't surface as spurious errors.
+func stopBuilderForCleanup(ctx context.Context, c incus.InstanceServer, name string) error {
+	op, err := c.UpdateInstanceState(name, api.InstanceStatePut{
+		Action:  "stop",
+		Force:   true,
+		Timeout: -1,
+	}, "")
+	if err != nil {
+		if isAlreadyStopped(err) {
+			return nil
+		}
+		return err
+	}
+
+	if err := waitCleanupOp(ctx, op); err != nil {
+		if isAlreadyStopped(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 // checkExecExit waits for an exec operation and returns an error if the executed
 // command exited non-zero. op.WaitContext only fails when the *operation* fails,
 // not when the command itself exits non-zero — so without this, a failed
@@ -137,20 +164,7 @@ func BaseImage(ctx context.Context, c incus.InstanceServer, conf Config) error {
 
 	// Ensure the builder instance is cleaned up on any subsequent failure.
 	defer func() {
-		stopOp, err := c.UpdateInstanceState(req.Name, api.InstanceStatePut{
-			Action:  "stop",
-			Force:   true,
-			Timeout: -1,
-		}, "")
-		// On the success path the instance is already stopped before publish,
-		// so this stop is expected to be a no-op. Incus reports that as a
-		// 400 "instance is already stopped" — treat it as success rather than
-		// logging a spurious error.
-		if err != nil {
-			if !isAlreadyStopped(err) {
-				slog.Error("error stopping builder instance", "instance", req.Name, "err", err)
-			}
-		} else if err := waitCleanupOp(ctx, stopOp); err != nil {
+		if err := stopBuilderForCleanup(ctx, c, req.Name); err != nil {
 			slog.Error("error stopping builder instance", "instance", req.Name, "err", err)
 		}
 

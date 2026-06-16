@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	incus "github.com/lxc/incus/v6/client"
@@ -308,6 +309,13 @@ su - "${AGENT_USER}" -c "
 		}
 	}()
 
+	// atDataDone is closed once the data-transfer phase reaches 100%. After
+	// that, the server still spends time finalizing (compressing and storing)
+	// the image while WaitContext blocks, so we switch to a spinner to show
+	// that work is still in progress.
+	atDataDone := make(chan struct{})
+	var dataDoneOnce sync.Once
+
 	_, _ = op.AddHandler(func(o api.Operation) {
 		if o.Metadata == nil {
 			return
@@ -335,12 +343,62 @@ su - "${AGENT_USER}" -c "
 
 			_ = p.Set(perc)
 
+			if perc >= 100 {
+				dataDoneOnce.Do(func() { close(atDataDone) })
+			}
 		}
 	})
 
+	// Show a finalizing spinner once the data transfer completes, so the user
+	// gets feedback during the server-side image finalization that would
+	// otherwise look like the publish has hung at 100%.
+	finalizeStop := make(chan struct{})
+	finalizeDone := make(chan struct{})
+	go func() {
+		defer close(finalizeDone)
+
+		select {
+		case <-atDataDone:
+		case <-ctx.Done():
+			return
+		}
+
+		// Settle the data-transfer bar at 100% on its own line before the
+		// spinner takes over, so the two don't render to the same line.
+		_ = p.Finish()
+
+		spinner := progressbar.NewOptions(-1,
+			progressbar.OptionSetDescription("finalizing image"),
+			progressbar.OptionSetWriter(os.Stderr),
+			progressbar.OptionSpinnerType(14),
+			progressbar.OptionOnCompletion(func() {
+				fmt.Fprint(os.Stderr, "\n")
+			}),
+		)
+
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-finalizeStop:
+				_ = spinner.Finish()
+				return
+			case <-ticker.C:
+				_ = spinner.Add(1)
+			}
+		}
+	}()
+
 	if err = op.WaitContext(ctx); err != nil {
+		close(finalizeStop)
+		<-finalizeDone
 		return err
 	}
+	close(finalizeStop)
+	<-finalizeDone
 
 	// Grab the fingerprint
 	fingerprint, ok := op.Get().Metadata["fingerprint"].(string)

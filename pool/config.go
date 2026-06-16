@@ -41,8 +41,8 @@ type IncusConfig struct {
 	// DiskSizeInGb sets the VM root disk size. Ignored for container pools
 	// (containers share the host filesystem). Recommended for VM pools.
 	DiskSizeInGb int `json:"diskSizeInGb,omitempty" validate:"min=0"`
-	// StoragePool is the Incus storage pool used to size the VM root disk when DiskSizeInGb is set on a VM pool.
-	// Defaults to "default".
+	// StoragePool is the Incus storage pool used to size the VM root disk when
+	// DiskSizeInGb is set on a VM pool. Leave empty to use Incus's default pool.
 	StoragePool string `json:"storagePool,omitempty"`
 	// StartupGracePeriod is how long to wait before considering an agent stale
 	StartupGracePeriod time.Duration `json:"startupGracePeriod,omitempty"`

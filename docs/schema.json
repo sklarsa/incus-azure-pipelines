@@ -148,7 +148,7 @@
         },
         "storagePool": {
           "type": "string",
-          "description": "StoragePool is the Incus storage pool used to size the VM root disk when DiskSizeInGb is set on a VM pool.\nDefaults to \"default\"."
+          "description": "StoragePool is the Incus storage pool used to size the VM root disk when\nDiskSizeInGb is set on a VM pool. Leave empty to use Incus's default pool."
         },
         "startupGracePeriod": {
           "type": "integer",

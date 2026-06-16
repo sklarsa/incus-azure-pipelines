@@ -318,7 +318,7 @@ pools:
 	assert.Equal(t, 0, config.Pools[0].Incus.DiskSizeInGb)
 }
 
-func TestParseConfig_StoragePoolDefault(t *testing.T) {
+func TestParseConfig_StoragePoolUnset(t *testing.T) {
 	yaml := `
 pools:
   - name: my-pool
@@ -332,10 +332,12 @@ pools:
 `
 	config, err := parseConfig([]byte(yaml))
 	require.NoError(t, err)
-	assert.Equal(t, "default", config.Pools[0].Incus.StoragePool)
+	// Left empty on purpose: Incus resolves an empty pool to its default at
+	// instance-creation time, so we don't default it here.
+	assert.Equal(t, "", config.Pools[0].Incus.StoragePool)
 }
 
-func TestParseConfig_StoragePoolEmptyStringDefaulted(t *testing.T) {
+func TestParseConfig_StoragePoolSet(t *testing.T) {
 	yaml := `
 pools:
   - name: my-pool
@@ -345,13 +347,12 @@ pools:
       url: "https://dev.azure.com/org"
     incus:
       image: "img"
-      storagePool: ""
+      vm: true
+      storagePool: fast-nvme
 `
 	config, err := parseConfig([]byte(yaml))
 	require.NoError(t, err)
-	// Explicit empty string must still be defaulted to "default" by the explicit loop,
-	// since creasty/defaults does not recurse into slice elements.
-	assert.Equal(t, "default", config.Pools[0].Incus.StoragePool)
+	assert.Equal(t, "fast-nvme", config.Pools[0].Incus.StoragePool)
 }
 
 func TestParseConfig_EmptyInput(t *testing.T) {

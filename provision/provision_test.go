@@ -2,6 +2,8 @@ package provision
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -104,4 +106,63 @@ func TestWaitCleanupOpIgnoresParentCancellation(t *testing.T) {
 
 	err := waitCleanupOp(parentCtx, op)
 	require.NoError(t, err)
+}
+
+func TestIsAlreadyStopped(t *testing.T) {
+	t.Run("matches the incus already-stopped status error", func(t *testing.T) {
+		err := api.StatusErrorf(http.StatusBadRequest, "The instance is already stopped")
+		assert.True(t, isAlreadyStopped(err))
+	})
+
+	t.Run("does not match other bad-request errors", func(t *testing.T) {
+		err := api.StatusErrorf(http.StatusBadRequest, "some other problem")
+		assert.False(t, isAlreadyStopped(err))
+	})
+
+	t.Run("does not match a plain error", func(t *testing.T) {
+		assert.False(t, isAlreadyStopped(errors.New("already stopped")))
+	})
+}
+
+func TestStopBuilderForCleanup(t *testing.T) {
+	alreadyStopped := api.StatusErrorf(http.StatusBadRequest, "The instance is already stopped")
+
+	t.Run("already stopped via WaitContext is not an error", func(t *testing.T) {
+		op := mocks.NewMockOperation(t)
+		op.On("WaitContext", mock.Anything).Return(alreadyStopped)
+
+		c := mocks.NewMockInstanceServer(t)
+		c.On("UpdateInstanceState", "builder", mock.Anything, "").Return(op, nil)
+
+		require.NoError(t, stopBuilderForCleanup(context.Background(), c, "builder"))
+	})
+
+	t.Run("already stopped synchronously is not an error", func(t *testing.T) {
+		c := mocks.NewMockInstanceServer(t)
+		c.On("UpdateInstanceState", "builder", mock.Anything, "").Return(nil, alreadyStopped)
+
+		require.NoError(t, stopBuilderForCleanup(context.Background(), c, "builder"))
+	})
+
+	t.Run("a genuine stop failure is returned", func(t *testing.T) {
+		op := mocks.NewMockOperation(t)
+		op.On("WaitContext", mock.Anything).Return(errors.New("boom"))
+
+		c := mocks.NewMockInstanceServer(t)
+		c.On("UpdateInstanceState", "builder", mock.Anything, "").Return(op, nil)
+
+		err := stopBuilderForCleanup(context.Background(), c, "builder")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "boom")
+	})
+
+	t.Run("a stopped instance is stopped cleanly", func(t *testing.T) {
+		op := mocks.NewMockOperation(t)
+		op.On("WaitContext", mock.Anything).Return(nil)
+
+		c := mocks.NewMockInstanceServer(t)
+		c.On("UpdateInstanceState", "builder", mock.Anything, "").Return(op, nil)
+
+		require.NoError(t, stopBuilderForCleanup(context.Background(), c, "builder"))
+	})
 }

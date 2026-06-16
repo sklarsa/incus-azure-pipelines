@@ -125,29 +125,6 @@ func BaseImage(ctx context.Context, c incus.InstanceServer, conf Config) error {
 		return err
 	}
 
-	// Ensure the builder instance is cleaned up on any subsequent failure.
-	defer func() {
-		stopOp, err := c.UpdateInstanceState(req.Name, api.InstanceStatePut{
-			Action:  "stop",
-			Force:   true,
-			Timeout: -1,
-		}, "")
-		if err == nil {
-			if err := waitCleanupOp(ctx, stopOp); err != nil {
-				slog.Error("error stopping builder instance", "instance", req.Name, "err", err)
-			}
-		}
-
-		delOp, err := c.DeleteInstance(req.Name)
-		if err != nil {
-			slog.Error("error deleting", "instance", req.Name, "err", err)
-			return
-		}
-		if err = waitCleanupOp(ctx, delOp); err != nil {
-			slog.Error("error deleting", "instance", req.Name, "err", err)
-		}
-	}()
-
 	if conf.VM {
 		if err := waitBuilderAgent(ctx, c, req.Name, 3*time.Minute, 2*time.Second); err != nil {
 			return err
@@ -240,15 +217,35 @@ su - "${AGENT_USER}" -c "
 		return err
 	}
 
-	// Now execute custom provisioning scripts
+	// Now execute custom provisioning scripts. Copy each script into the
+	// instance, exec it by path, then remove it. Piping the script via stdin
+	// can hang on large scripts, so we push the file first and run it directly.
 	for idx, s := range provisioningScripts {
+		remotePath := fmt.Sprintf("/tmp/provision-%d.sh", idx)
+
+		if err := c.CreateInstanceFile(
+			req.Name,
+			remotePath,
+			incus.InstanceFileArgs{
+				Content:   bytes.NewReader(s),
+				Mode:      0755,
+				WriteMode: "overwrite",
+			},
+		); err != nil {
+			return fmt.Errorf("error copying script %s: %w", conf.Scripts[idx], err)
+		}
+
+		runReq := api.InstanceExecPost{
+			Command:     []string{"bash", remotePath},
+			WaitForWS:   true,
+			Interactive: false,
+		}
 		args := &incus.InstanceExecArgs{
-			Stdin:  bytes.NewReader(s),
 			Stdout: os.Stdout,
 			Stderr: os.Stderr,
 		}
 
-		op, err = c.ExecInstance(req.Name, execReq, args)
+		op, err = c.ExecInstance(req.Name, runReq, args)
 		if err != nil {
 			return fmt.Errorf("error executing script %s: %w", conf.Scripts[idx], err)
 		}
@@ -256,6 +253,10 @@ su - "${AGENT_USER}" -c "
 			return err
 		}
 
+		// Remove the script now that it has run.
+		if err := c.DeleteInstanceFile(req.Name, remotePath); err != nil {
+			slog.Warn("error removing provisioning script", "instance", req.Name, "path", remotePath, "err", err)
+		}
 	}
 
 	// Stop the instance so it can published

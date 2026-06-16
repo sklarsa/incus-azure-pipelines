@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	incus "github.com/lxc/incus/v6/client"
@@ -48,6 +49,15 @@ func instanceTypeStr(vm bool) string {
 
 //go:embed run_agent.sh
 var runAgentScript string
+
+// isAlreadyStopped reports whether err is the Incus "instance is already
+// stopped" response. Incus returns this as a 400 Bad Request with that
+// message; there is no exported sentinel in the client package, so we match
+// on the status and message.
+func isAlreadyStopped(err error) bool {
+	return api.StatusErrorCheck(err, http.StatusBadRequest) &&
+		strings.Contains(err.Error(), "already stopped")
+}
 
 func waitCleanupOp(ctx context.Context, op incus.Operation) error {
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), builderCleanupOpTimeout)
@@ -124,6 +134,35 @@ func BaseImage(ctx context.Context, c incus.InstanceServer, conf Config) error {
 	if err = op.WaitContext(ctx); err != nil {
 		return err
 	}
+
+	// Ensure the builder instance is cleaned up on any subsequent failure.
+	defer func() {
+		stopOp, err := c.UpdateInstanceState(req.Name, api.InstanceStatePut{
+			Action:  "stop",
+			Force:   true,
+			Timeout: -1,
+		}, "")
+		// On the success path the instance is already stopped before publish,
+		// so this stop is expected to be a no-op. Incus reports that as a
+		// 400 "instance is already stopped" — treat it as success rather than
+		// logging a spurious error.
+		if err != nil {
+			if !isAlreadyStopped(err) {
+				slog.Error("error stopping builder instance", "instance", req.Name, "err", err)
+			}
+		} else if err := waitCleanupOp(ctx, stopOp); err != nil {
+			slog.Error("error stopping builder instance", "instance", req.Name, "err", err)
+		}
+
+		delOp, err := c.DeleteInstance(req.Name)
+		if err != nil {
+			slog.Error("error deleting", "instance", req.Name, "err", err)
+			return
+		}
+		if err = waitCleanupOp(ctx, delOp); err != nil {
+			slog.Error("error deleting", "instance", req.Name, "err", err)
+		}
+	}()
 
 	if conf.VM {
 		if err := waitBuilderAgent(ctx, c, req.Name, 3*time.Minute, 2*time.Second); err != nil {
@@ -318,6 +357,13 @@ su - "${AGENT_USER}" -c "
 		}
 	}()
 
+	// atDataDone is closed once the data-transfer phase reaches 100%. After
+	// that, the server still spends time finalizing (compressing and storing)
+	// the image while WaitContext blocks, so we switch to a spinner to show
+	// that work is still in progress.
+	atDataDone := make(chan struct{})
+	var dataDoneOnce sync.Once
+
 	_, _ = op.AddHandler(func(o api.Operation) {
 		if o.Metadata == nil {
 			return
@@ -345,12 +391,62 @@ su - "${AGENT_USER}" -c "
 
 			_ = p.Set(perc)
 
+			if perc >= 100 {
+				dataDoneOnce.Do(func() { close(atDataDone) })
+			}
 		}
 	})
 
+	// Show a finalizing spinner once the data transfer completes, so the user
+	// gets feedback during the server-side image finalization that would
+	// otherwise look like the publish has hung at 100%.
+	finalizeStop := make(chan struct{})
+	finalizeDone := make(chan struct{})
+	go func() {
+		defer close(finalizeDone)
+
+		select {
+		case <-atDataDone:
+		case <-ctx.Done():
+			return
+		}
+
+		// Settle the data-transfer bar at 100% on its own line before the
+		// spinner takes over, so the two don't render to the same line.
+		_ = p.Finish()
+
+		spinner := progressbar.NewOptions(-1,
+			progressbar.OptionSetDescription("finalizing image"),
+			progressbar.OptionSetWriter(os.Stderr),
+			progressbar.OptionSpinnerType(14),
+			progressbar.OptionOnCompletion(func() {
+				fmt.Fprint(os.Stderr, "\n")
+			}),
+		)
+
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-finalizeStop:
+				_ = spinner.Finish()
+				return
+			case <-ticker.C:
+				_ = spinner.Add(1)
+			}
+		}
+	}()
+
 	if err = op.WaitContext(ctx); err != nil {
+		close(finalizeStop)
+		<-finalizeDone
 		return err
 	}
+	close(finalizeStop)
+	<-finalizeDone
 
 	// Grab the fingerprint
 	fingerprint, ok := op.Get().Metadata["fingerprint"].(string)

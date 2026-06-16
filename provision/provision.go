@@ -184,6 +184,11 @@ su - "${AGENT_USER}" -c "
   tar -xzf agent.tar.gz
   rm agent.tar.gz
 "
+
+# Install the agent's runtime dependencies (libicu, etc.). Without these the
+# agent's config.sh aborts on first run with a missing-assembly error
+# (e.g. Microsoft.Win32.Primitives). The tarball ships this helper.
+"${AGENT_HOME}/bin/installdependencies.sh"
 `
 	args := &incus.InstanceExecArgs{
 		Stdin:  strings.NewReader(script),

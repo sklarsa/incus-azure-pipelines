@@ -256,22 +256,55 @@ su - "${AGENT_USER}" -c "
 		return err
 	}
 
-	// Now execute custom provisioning scripts
+	// Now execute custom provisioning scripts. Copy each script into the
+	// instance, exec it by path, then remove it. Piping the script via stdin
+	// can hang on large scripts, so we push the file first and run it directly.
 	for idx, s := range provisioningScripts {
-		args := &incus.InstanceExecArgs{
-			Stdin:  bytes.NewReader(s),
-			Stdout: os.Stdout,
-			Stderr: os.Stderr,
+		// Wrap each script in a closure so the deferred cleanup runs after that
+		// script executes, rather than piling up until BaseImage returns (which
+		// happens only after the image is published).
+		runScript := func() error {
+			remotePath := fmt.Sprintf("/tmp/provision-%d.sh", idx)
+
+			if err := c.CreateInstanceFile(
+				req.Name,
+				remotePath,
+				incus.InstanceFileArgs{
+					Content:   bytes.NewReader(s),
+					Mode:      0755,
+					WriteMode: "overwrite",
+				},
+			); err != nil {
+				return fmt.Errorf("error copying script %s: %w", conf.Scripts[idx], err)
+			}
+
+			// Remove the script once it has run.
+			defer func() {
+				if err := c.DeleteInstanceFile(req.Name, remotePath); err != nil {
+					slog.Warn("error removing provisioning script", "instance", req.Name, "path", remotePath, "err", err)
+				}
+			}()
+
+			runReq := api.InstanceExecPost{
+				Command:     []string{"bash", remotePath},
+				WaitForWS:   true,
+				Interactive: false,
+			}
+			args := &incus.InstanceExecArgs{
+				Stdout: os.Stdout,
+				Stderr: os.Stderr,
+			}
+
+			op, err := c.ExecInstance(req.Name, runReq, args)
+			if err != nil {
+				return fmt.Errorf("error executing script %s: %w", conf.Scripts[idx], err)
+			}
+			return checkExecExit(ctx, op, fmt.Sprintf("script %s", conf.Scripts[idx]))
 		}
 
-		op, err = c.ExecInstance(req.Name, execReq, args)
-		if err != nil {
-			return fmt.Errorf("error executing script %s: %w", conf.Scripts[idx], err)
-		}
-		if err := checkExecExit(ctx, op, fmt.Sprintf("script %s", conf.Scripts[idx])); err != nil {
+		if err := runScript(); err != nil {
 			return err
 		}
-
 	}
 
 	// Stop the instance so it can published

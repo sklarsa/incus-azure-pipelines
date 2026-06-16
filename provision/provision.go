@@ -321,6 +321,28 @@ su - "${AGENT_USER}" -c "
 		}
 	}
 
+	// Flush the guest filesystem before stopping. For VM images the rootfs
+	// lives on a virtual block device and provisioning writes sit in the guest
+	// kernel's page cache; if we stop and publish without syncing, the snapshot
+	// can capture a half-written filesystem (e.g. a truncated AWS CLI install
+	// missing its /usr/local/bin/aws symlink). Containers write straight to the
+	// host FS so this is only strictly needed for VMs, but it's harmless either
+	// way.
+	syncReq := api.InstanceExecPost{
+		Command:   []string{"sync"},
+		WaitForWS: true,
+	}
+	syncOp, err := c.ExecInstance(req.Name, syncReq, &incus.InstanceExecArgs{
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+	})
+	if err != nil {
+		return fmt.Errorf("error syncing guest filesystem: %w", err)
+	}
+	if err := checkExecExit(ctx, syncOp, "guest filesystem sync"); err != nil {
+		return err
+	}
+
 	// Stop the instance so it can published
 	slog.Info("stopping instance", "instance", i.Name)
 	op, err = c.UpdateInstanceState(req.Name, api.InstanceStatePut{

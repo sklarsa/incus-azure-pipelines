@@ -56,6 +56,28 @@ func waitCleanupOp(ctx context.Context, op incus.Operation) error {
 	return op.WaitContext(cleanupCtx)
 }
 
+// checkExecExit waits for an exec operation and returns an error if the executed
+// command exited non-zero. op.WaitContext only fails when the *operation* fails,
+// not when the command itself exits non-zero — so without this, a failed
+// provisioning step would be ignored and a broken image published anyway.
+func checkExecExit(ctx context.Context, op incus.Operation, desc string) error {
+	if err := op.WaitContext(ctx); err != nil {
+		return fmt.Errorf("error executing %s: %w", desc, err)
+	}
+	meta := op.Get().Metadata
+	if meta == nil {
+		return fmt.Errorf("error executing %s: no operation metadata", desc)
+	}
+	ret, ok := meta["return"].(float64)
+	if !ok {
+		return fmt.Errorf("error executing %s: could not determine exit code", desc)
+	}
+	if int(ret) != 0 {
+		return fmt.Errorf("%s exited with code %d", desc, int(ret))
+	}
+	return nil
+}
+
 func BaseImage(ctx context.Context, c incus.InstanceServer, conf Config) error {
 	if conf.ProjectName != "" {
 		c = c.UseProject(conf.ProjectName)
@@ -200,8 +222,7 @@ su - "${AGENT_USER}" -c "
 	if err != nil {
 		return err
 	}
-
-	if err := op.WaitContext(ctx); err != nil {
+	if err := checkExecExit(ctx, op, "base provisioning"); err != nil {
 		return err
 	}
 
@@ -231,9 +252,8 @@ su - "${AGENT_USER}" -c "
 		if err != nil {
 			return fmt.Errorf("error executing script %s: %w", conf.Scripts[idx], err)
 		}
-
-		if err := op.WaitContext(ctx); err != nil {
-			return fmt.Errorf("error executing script %s: %w", conf.Scripts[idx], err)
+		if err := checkExecExit(ctx, op, fmt.Sprintf("script %s", conf.Scripts[idx])); err != nil {
+			return err
 		}
 
 	}

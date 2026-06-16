@@ -5,11 +5,39 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lxc/incus/v6/shared/api"
 	"github.com/sklarsa/incus-azure-pipelines/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCheckExecExit(t *testing.T) {
+	t.Run("zero exit passes", func(t *testing.T) {
+		op := mocks.NewMockOperation(t)
+		op.On("WaitContext", mock.Anything).Return(nil)
+		op.On("Get").Return(api.Operation{Metadata: map[string]any{"return": float64(0)}})
+		require.NoError(t, checkExecExit(context.Background(), op, "test step"))
+	})
+
+	t.Run("non-zero exit returns an error", func(t *testing.T) {
+		op := mocks.NewMockOperation(t)
+		op.On("WaitContext", mock.Anything).Return(nil)
+		op.On("Get").Return(api.Operation{Metadata: map[string]any{"return": float64(2)}})
+		err := checkExecExit(context.Background(), op, "test step")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "test step exited with code 2")
+	})
+
+	t.Run("missing return code is an error", func(t *testing.T) {
+		op := mocks.NewMockOperation(t)
+		op.On("WaitContext", mock.Anything).Return(nil)
+		op.On("Get").Return(api.Operation{Metadata: map[string]any{}})
+		err := checkExecExit(context.Background(), op, "test step")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "could not determine exit code")
+	})
+}
 
 func TestInstanceTypeStr(t *testing.T) {
 	assert.Equal(t, "container", instanceTypeStr(false))

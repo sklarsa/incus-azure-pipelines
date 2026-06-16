@@ -282,6 +282,79 @@ pools:
 	assert.Equal(t, 60*time.Second, config.Pools[0].Incus.StartupGracePeriod)
 }
 
+func TestParseConfig_VMSettings(t *testing.T) {
+	yaml := `
+pools:
+  - name: my-pool
+    agentCount: 2
+    azure:
+      pat: "token"
+      url: "https://dev.azure.com/org"
+    incus:
+      image: "vm-agent"
+      vm: true
+      diskSizeInGb: 50
+`
+	config, err := parseConfig([]byte(yaml))
+	require.NoError(t, err)
+	assert.True(t, config.Pools[0].Incus.VM)
+	assert.Equal(t, 50, config.Pools[0].Incus.DiskSizeInGb)
+}
+
+func TestParseConfig_VMDefaultsFalse(t *testing.T) {
+	yaml := `
+pools:
+  - name: my-pool
+    agentCount: 1
+    azure:
+      pat: "token"
+      url: "https://dev.azure.com/org"
+    incus:
+      image: "img"
+`
+	config, err := parseConfig([]byte(yaml))
+	require.NoError(t, err)
+	assert.False(t, config.Pools[0].Incus.VM)
+	assert.Equal(t, 0, config.Pools[0].Incus.DiskSizeInGb)
+}
+
+func TestParseConfig_StoragePoolUnset(t *testing.T) {
+	yaml := `
+pools:
+  - name: my-pool
+    agentCount: 1
+    azure:
+      pat: "token"
+      url: "https://dev.azure.com/org"
+    incus:
+      image: "img"
+      vm: true
+`
+	config, err := parseConfig([]byte(yaml))
+	require.NoError(t, err)
+	// Left empty on purpose: Incus resolves an empty pool to its default at
+	// instance-creation time, so we don't default it here.
+	assert.Equal(t, "", config.Pools[0].Incus.StoragePool)
+}
+
+func TestParseConfig_StoragePoolSet(t *testing.T) {
+	yaml := `
+pools:
+  - name: my-pool
+    agentCount: 1
+    azure:
+      pat: "token"
+      url: "https://dev.azure.com/org"
+    incus:
+      image: "img"
+      vm: true
+      storagePool: fast-nvme
+`
+	config, err := parseConfig([]byte(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, "fast-nvme", config.Pools[0].Incus.StoragePool)
+}
+
 func TestParseConfig_EmptyInput(t *testing.T) {
 	// Empty input resets defaults due to YAML unmarshalling behavior
 	config, err := parseConfig([]byte(""))

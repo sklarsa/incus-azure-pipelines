@@ -525,7 +525,7 @@ func TestPool_Reap_ReapsStaleAgent(t *testing.T) {
 	stopOp := mocks.NewMockOperation(t)
 	stopOp.On("WaitContext", mock.Anything).Return(nil)
 	m.On("UpdateInstanceState", "azp-agent-0", mock.MatchedBy(func(req api.InstanceStatePut) bool {
-		return req.Action == "stop" && req.Force == true
+		return req.Action == "stop" && req.Force == true && req.Timeout == 30
 	}), "").Return(stopOp, nil)
 
 	conf := testConfig()
@@ -723,6 +723,165 @@ func TestPool_Create_WithoutEnv(t *testing.T) {
 
 	err = pool.CreateAgent(context.Background(), 0)
 	require.NoError(t, err)
+}
+
+func TestPool_Create_VM(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+	conf.Incus.VM = true
+	conf.Incus.StoragePool = "default"
+	conf.Incus.MaxCores = 4
+	conf.Incus.MaxRamInGb = 8
+	conf.Incus.DiskSizeInGb = 50
+	conf.Incus.TmpfsSizeInGb = 12 // must be ignored for VMs
+
+	op := mocks.NewMockOperation(t)
+	op.On("WaitContext", mock.Anything).Return(nil)
+
+	m.On("CreateInstance", mock.MatchedBy(func(req api.InstancesPost) bool {
+		_, hasRawLxc := req.Config["raw.lxc"]
+		_, hasNesting := req.Config["security.nesting"]
+		_, hasAllowance := req.Config["limits.cpu.allowance"]
+		_, hasTmpfs := req.Devices["tmpfs"]
+		root, hasRoot := req.Devices["root"]
+		return req.Name == "azp-agent-0" &&
+			req.Type == api.InstanceTypeVM &&
+			!hasRawLxc && !hasNesting && !hasAllowance && !hasTmpfs &&
+			req.Config["limits.cpu"] == "4" &&
+			req.Config["limits.memory"] == "8GiB" &&
+			hasRoot && root["size"] == "50GiB" && root["type"] == "disk" && root["pool"] == "default"
+	})).Return(op, nil)
+
+	m.On("CreateInstanceFile", "azp-agent-0", "/home/agent/.token", mock.Anything).Return(nil)
+
+	execOp := mocks.NewMockOperation(t)
+	execOp.On("WaitContext", mock.Anything).Return(nil)
+	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(execOp, nil)
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	err = pool.CreateAgent(context.Background(), 0)
+	require.NoError(t, err)
+}
+
+func TestPool_List_VM(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstances", api.InstanceTypeVM).Return([]api.Instance{
+		{Name: "azp-agent-0"},
+	}, nil)
+
+	conf := testConfig()
+	conf.Incus.VM = true
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	agents, err := pool.ListAgents()
+	require.NoError(t, err)
+	assert.Len(t, agents, 1)
+}
+
+func TestPool_ListFull_VM(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstancesFull", api.InstanceTypeVM).Return([]api.InstanceFull{
+		{Instance: api.Instance{Name: "azp-agent-0"}},
+	}, nil)
+
+	conf := testConfig()
+	conf.Incus.VM = true
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	agents, err := pool.ListAgentsFull()
+	require.NoError(t, err)
+	assert.Len(t, agents, 1)
+}
+
+func TestPool_WaitForAgent_RetriesUntilReady(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+	conf.Incus.VM = true
+
+	// First probe fails (agent not up), second succeeds.
+	failOp := mocks.NewMockOperation(t)
+	failOp.On("WaitContext", mock.Anything).Return(fmt.Errorf("VM agent isn't currently running"))
+	okOp := mocks.NewMockOperation(t)
+	okOp.On("WaitContext", mock.Anything).Return(nil)
+	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).
+		Return(failOp, nil).Once()
+	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).
+		Return(okOp, nil).Once()
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	err = pool.waitForAgent(context.Background(), "azp-agent-0", 5*time.Second, time.Millisecond)
+	require.NoError(t, err)
+}
+
+func TestNewPool_DefaultGracePeriod_Container(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig() // VM false, grace unset
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+	assert.Equal(t, time.Minute, pool.conf.Incus.StartupGracePeriod)
+}
+
+func TestNewPool_DefaultGracePeriod_VM(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+	conf.Incus.VM = true
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+	assert.Equal(t, 5*time.Minute, pool.conf.Incus.StartupGracePeriod)
+}
+
+func TestNewPool_ExplicitGracePeriodRespected(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+	conf.Incus.VM = true
+	conf.Incus.StartupGracePeriod = 90 * time.Second
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+	assert.Equal(t, 90*time.Second, pool.conf.Incus.StartupGracePeriod)
+}
+
+func TestPool_Reap_VM_UsesLongerStopTimeout(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	m.On("GetInstancesFull", api.InstanceTypeVM).Return([]api.InstanceFull{
+		{
+			Instance: api.Instance{Name: "azp-agent-0", CreatedAt: time.Now().Add(-10 * time.Minute)},
+			State:    &api.InstanceState{Status: "Running"},
+		},
+	}, nil)
+
+	// pgrep returns 1 (agent process not found) -> stale
+	execOp := mocks.NewMockOperation(t)
+	execOp.On("WaitContext", mock.Anything).Return(nil)
+	execOp.On("Get").Return(api.Operation{Metadata: map[string]any{"return": float64(1)}})
+	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(execOp, nil)
+
+	stopOp := mocks.NewMockOperation(t)
+	stopOp.On("WaitContext", mock.MatchedBy(func(ctx context.Context) bool {
+		d, ok := ctx.Deadline()
+		return ok && time.Until(d) > 80*time.Second
+	})).Return(nil)
+	m.On("UpdateInstanceState", "azp-agent-0", mock.MatchedBy(func(req api.InstanceStatePut) bool {
+		return req.Action == "stop" && req.Force && req.Timeout == 60
+	}), "").Return(stopOp, nil)
+
+	conf := testConfig()
+	conf.Incus.VM = true
+	conf.Incus.StartupGracePeriod = time.Minute
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	err = pool.Reap(context.Background())
+	require.NoError(t, err)
+	m.AssertCalled(t, "UpdateInstanceState", "azp-agent-0", mock.Anything, "")
 }
 
 func TestWaitOp_Timeout(t *testing.T) {

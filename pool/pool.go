@@ -44,22 +44,34 @@ type Pool struct {
 func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
 	if conf.Incus.ProjectName != "" {
 		c = c.UseProject(conf.Incus.ProjectName)
-		slog.Info("using project", "name", conf.Incus.ProjectName)
-	} else {
-		slog.Info("using default project")
 	}
 
 	p := &Pool{
 		c:        c,
 		conf:     conf,
 		inFlight: &sync.Map{},
-		logger:   slog.With("pool", conf.Name, "project", conf.Incus.ProjectName),
+	}
+	// Log the effective project ("default" when unset) so it's clear where
+	// instances are created.
+	p.logger = slog.With("pool", conf.Name, "project", p.Project())
+	p.logger.Info("initializing pool", "vm", conf.Incus.VM, "image", conf.Incus.Image)
+
+	if p.conf.Incus.VM && p.conf.Incus.TmpfsSizeInGb > 0 {
+		p.logger.Warn("ignoring tmpfsSizeInGb for VM pool (not supported for VMs)")
 	}
 
 	var err error
 	p.agentRe, err = regexp.Compile("^" + conf.Name + `-(\d+)$`)
 	if err != nil {
 		return nil, fmt.Errorf("unable to construct agent regexp from Name %q: %w", conf.Name, err)
+	}
+
+	if p.conf.Incus.StartupGracePeriod == 0 {
+		if p.conf.Incus.VM {
+			p.conf.Incus.StartupGracePeriod = 5 * time.Minute
+		} else {
+			p.conf.Incus.StartupGracePeriod = time.Minute
+		}
 	}
 
 	err = prometheus.DefaultRegisterer.Register(newAgentUptimeCollector(p))
@@ -90,7 +102,7 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 
 		req := api.InstancesPost{
 			Name: p.AgentName(idx),
-			Type: api.InstanceTypeContainer,
+			Type: p.instanceType(),
 			Source: api.InstanceSource{
 				Alias: p.conf.Incus.Image,
 				Type:  "image",
@@ -99,29 +111,43 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 			InstancePut: api.InstancePut{
 				Config: map[string]string{
 					"boot.host_shutdown_action": "force-stop",
-					"raw.lxc":                   "lxc.cgroup2.memory.oom.group = 1",
-					"security.nesting":          "true",
 				},
 				Ephemeral: true,
 				Devices:   map[string]map[string]string{},
 			},
 		}
 
-		if p.conf.Incus.MaxCores > 0 {
-			req.Config["limits.cpu.allowance"] = fmt.Sprintf("%d%%", p.conf.Incus.MaxCores*100)
+		if p.conf.Incus.VM {
+			// VMs have their own kernel; container-only keys are invalid/unneeded.
+			if p.conf.Incus.MaxCores > 0 {
+				req.Config["limits.cpu"] = fmt.Sprintf("%d", p.conf.Incus.MaxCores)
+			}
+			if p.conf.Incus.DiskSizeInGb > 0 {
+				req.Devices["root"] = map[string]string{
+					"type": "disk",
+					"path": "/",
+					"pool": p.conf.Incus.StoragePool,
+					"size": fmt.Sprintf("%dGiB", p.conf.Incus.DiskSizeInGb),
+				}
+			}
+		} else {
+			req.Config["raw.lxc"] = "lxc.cgroup2.memory.oom.group = 1"
+			req.Config["security.nesting"] = "true"
+			if p.conf.Incus.MaxCores > 0 {
+				req.Config["limits.cpu.allowance"] = fmt.Sprintf("%d%%", p.conf.Incus.MaxCores*100)
+			}
+			if p.conf.Incus.TmpfsSizeInGb > 0 {
+				req.Devices["tmpfs"] = map[string]string{
+					"type":   "disk",
+					"source": "tmpfs:",
+					"path":   "/tmp",
+					"size":   fmt.Sprintf("%dGiB", p.conf.Incus.TmpfsSizeInGb),
+				}
+			}
 		}
 
 		if p.conf.Incus.MaxRamInGb > 0 {
 			req.Config["limits.memory"] = fmt.Sprintf("%dGiB", p.conf.Incus.MaxRamInGb)
-		}
-
-		if p.conf.Incus.TmpfsSizeInGb > 0 {
-			req.Devices["tmpfs"] = map[string]string{
-				"type":   "disk",
-				"source": "tmpfs:",
-				"path":   "/tmp",
-				"size":   fmt.Sprintf("%dGiB", p.conf.Incus.TmpfsSizeInGb),
-			}
 		}
 
 		op, err := p.c.CreateInstance(req)
@@ -131,6 +157,12 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 
 		if err = waitOp(ctx, op, 2*time.Minute); err != nil {
 			return err
+		}
+
+		if p.conf.Incus.VM {
+			if err = p.waitForAgent(ctx, req.Name, 3*time.Minute, 2*time.Second); err != nil {
+				return err
+			}
 		}
 
 		if err = p.c.CreateInstanceFile(req.Name, "/home/agent/.token", incus.InstanceFileArgs{
@@ -200,7 +232,7 @@ func (p *Pool) isAgent(i api.Instance) bool {
 
 func (p *Pool) ListAgents() ([]api.Instance, error) {
 	agents := []api.Instance{}
-	allInstances, err := p.c.GetInstances(api.InstanceTypeContainer)
+	allInstances, err := p.c.GetInstances(p.instanceType())
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +248,7 @@ func (p *Pool) ListAgents() ([]api.Instance, error) {
 
 func (p *Pool) ListAgentsFull() ([]api.InstanceFull, error) {
 	agents := []api.InstanceFull{}
-	allInstances, err := p.c.GetInstancesFull(api.InstanceTypeContainer)
+	allInstances, err := p.c.GetInstancesFull(p.instanceType())
 	if err != nil {
 		return nil, err
 	}
@@ -385,10 +417,18 @@ func (p *Pool) isAgentProcessRunning(ctx context.Context, idx int) (bool, error)
 func (p *Pool) reapInstance(ctx context.Context, idx int) error {
 	name := p.AgentName(idx)
 
+	// waitTimeout must exceed stopTimeout so the client-side context doesn't cancel before Incus reports completion.
+	stopTimeout := 30
+	waitTimeout := 45 * time.Second
+	if p.conf.Incus.VM {
+		stopTimeout = 60
+		waitTimeout = 90 * time.Second
+	}
+
 	op, err := p.c.UpdateInstanceState(name, api.InstanceStatePut{
 		Action:  "stop",
 		Force:   true,
-		Timeout: 30,
+		Timeout: stopTimeout,
 	}, "")
 	if err != nil {
 		if api.StatusErrorCheck(err, http.StatusNotFound) {
@@ -397,7 +437,7 @@ func (p *Pool) reapInstance(ctx context.Context, idx int) error {
 		return err
 	}
 
-	if err := waitOp(ctx, op, 45*time.Second); err != nil {
+	if err := waitOp(ctx, op, waitTimeout); err != nil {
 		if api.StatusErrorCheck(err, http.StatusNotFound) {
 			return nil
 		}
@@ -430,6 +470,49 @@ func (p *Pool) AgentName(idx int) string {
 	return fmt.Sprintf("%s-%d", p.conf.Name, idx)
 }
 
+// waitForAgent polls a trivial exec until the guest agent responds, up to timeout.
+// VMs need their incus-agent running before file push / exec; containers are ready
+// immediately so callers should only invoke this for VM pools.
+// Near-duplicate of waitBuilderAgent in provision/provision.go — kept separate to avoid a pool<->provision import cycle.
+func (p *Pool) waitForAgent(ctx context.Context, name string, timeout, interval time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		op, err := p.c.ExecInstance(name, api.InstanceExecPost{
+			Command:     []string{"true"},
+			WaitForWS:   true,
+			Interactive: false,
+		}, &incus.InstanceExecArgs{})
+		if err == nil {
+			attemptCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			werr := op.WaitContext(attemptCtx)
+			cancel()
+			if werr == nil {
+				return nil
+			}
+			lastErr = werr
+		} else {
+			lastErr = err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("agent on %q not ready after %s: %w", name, timeout, lastErr)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+	}
+}
+
+// instanceType returns the Incus instance type for this pool's agents.
+func (p *Pool) instanceType() api.InstanceType {
+	if p.conf.Incus.VM {
+		return api.InstanceTypeVM
+	}
+	return api.InstanceTypeContainer
+}
+
 func (p *Pool) AgentLogs(ctx context.Context, idx int, w io.Writer) error {
 
 	if idx >= p.conf.AgentCount {
@@ -456,6 +539,11 @@ func (p *Pool) Name() string {
 	return p.conf.Name
 }
 
+// Project returns the effective Incus project for this pool ("default" when
+// unset), matching where instances are actually created.
 func (p *Pool) Project() string {
+	if p.conf.Incus.ProjectName == "" {
+		return "default"
+	}
 	return p.conf.Incus.ProjectName
 }

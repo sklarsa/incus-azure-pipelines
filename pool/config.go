@@ -21,17 +21,29 @@ type Config struct {
 }
 
 type IncusConfig struct {
-	// MaxCores specifies the max number of cores that each agent can use. Used to set limits.cpu.allowance
-	// for percentage-based soft limits
+	// MaxCores specifies the max number of cores that each agent can use. For container pools it sets
+	// limits.cpu.allowance as a percentage-based soft limit; for VM pools it sets limits.cpu as a hard
+	// vCPU count.
 	MaxCores int `json:"maxCores,omitempty" validate:"min=0"`
 	// MaxRamInGb specifies the max amount of RAM that each agent can use
 	MaxRamInGb int `json:"maxRamInGb,omitempty" validate:"min=0"`
-	// TmpfsSizeInGb specifies the maximum size of the tmpfs directory mounted to /tmp in each agent container
+	// TmpfsSizeInGb specifies the maximum size of the tmpfs directory mounted to /tmp in each agent container.
+	// Ignored for VM pools (VMs do not support tmpfs devices).
 	TmpfsSizeInGb int `json:"tmpfsSizeInGb,omitempty" validate:"min=0"`
 	// ProjectName is the name of the incus project used for Azure Pipelines Agent runners
 	ProjectName string `json:"projectName,omitempty"`
 	// Image is the Incus image alias to use for agent containers
 	Image string `json:"image" validate:"required"`
+	// VM, when true, runs agents as Incus virtual machines instead of system
+	// containers. VMs have their own kernel, so nested Docker/kind work without
+	// LXC hacks. Default: false (container).
+	VM bool `json:"vm,omitempty"`
+	// DiskSizeInGb sets the VM root disk size. Ignored for container pools
+	// (containers share the host filesystem). Recommended for VM pools.
+	DiskSizeInGb int `json:"diskSizeInGb,omitempty" validate:"min=0"`
+	// StoragePool is the Incus storage pool used to size the VM root disk when
+	// DiskSizeInGb is set on a VM pool. Leave empty to use Incus's default pool.
+	StoragePool string `json:"storagePool,omitempty"`
 	// StartupGracePeriod is how long to wait before considering an agent stale
 	StartupGracePeriod time.Duration `json:"startupGracePeriod,omitempty"`
 }

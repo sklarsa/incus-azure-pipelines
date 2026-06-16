@@ -64,9 +64,12 @@ pools:
     incus:
       projectName: azure-pipelines
       image: my-runner-image
-      maxCores: 8
+      vm: true            # run agents as Incus VMs (real kernel; nested Docker/kind work)
+      diskSizeInGb: 50    # VM root disk size (VM pools only)
+      maxCores: 8         # VM: vCPU count (limits.cpu); container: CPU allowance %
       maxRamInGb: 4
-      tmpfsSizeInGb: 12
+      tmpfsSizeInGb: 12   # ignored for VM pools
+      # startupGracePeriod defaults to 5m for VM pools (1m for containers) when unset
 ```
 
 ### Create a base image
@@ -78,6 +81,14 @@ You can also add your own custom provisioning by writing scripts and passing the
 ```bash
 incus-azure-pipelines provision --base ubuntu/24.04 --target my-runner-image --scripts /tmp/script1.sh --scripts /tmp/script2.sh
 ```
+
+For **VM pools** (`vm: true` in the config), build a VM base image instead of the container default by passing `--vm`:
+
+```bash
+incus-azure-pipelines provision --vm --base ubuntu/24.04 --target my-vm-runner-image --scripts /tmp/script1.sh
+```
+
+VM pools also default to a longer reaper startup grace period (5 minutes instead of 1 minute for containers), so slow-booting VMs are not reaped before their agent has a chance to register.
 
 ### Run the orchestrator
 

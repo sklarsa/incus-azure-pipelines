@@ -11,6 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestInstanceTypeStr(t *testing.T) {
+	assert.Equal(t, "container", instanceTypeStr(false))
+	assert.Equal(t, "virtual-machine", instanceTypeStr(true))
+}
+
 func TestRandomString(t *testing.T) {
 	t.Run("returns requested length", func(t *testing.T) {
 		s, err := randomString(16)

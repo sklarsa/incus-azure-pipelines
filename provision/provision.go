@@ -34,6 +34,16 @@ type Config struct {
 	// Scripts is a list of local file paths containing scripts that are run after the initial
 	// base image provisioning. This allows users to customize their agent environments.
 	Scripts []string
+	// VM builds a virtual-machine image instead of a container image.
+	VM bool
+}
+
+// instanceTypeStr returns the Incus instance type string for the API.
+func instanceTypeStr(vm bool) string {
+	if vm {
+		return "virtual-machine"
+	}
+	return "container"
 }
 
 //go:embed run_agent.sh
@@ -78,7 +88,7 @@ func BaseImage(ctx context.Context, c incus.InstanceServer, conf Config) error {
 			Server:   "https://images.linuxcontainers.org",
 			Protocol: "simplestreams",
 		},
-		Type:  "container",
+		Type:  api.InstanceType(instanceTypeStr(conf.VM)),
 		Start: true,
 	}
 
@@ -115,6 +125,12 @@ func BaseImage(ctx context.Context, c incus.InstanceServer, conf Config) error {
 			slog.Error("error deleting", "instance", req.Name, "err", err)
 		}
 	}()
+
+	if conf.VM {
+		if err := waitBuilderAgent(ctx, c, req.Name, 3*time.Minute, 2*time.Second); err != nil {
+			return err
+		}
+	}
 
 	i, etag, err := c.GetInstance(req.Name)
 	if err != nil {
@@ -168,6 +184,11 @@ su - "${AGENT_USER}" -c "
   tar -xzf agent.tar.gz
   rm agent.tar.gz
 "
+
+# Install the agent's runtime dependencies (libicu, etc.). Without these the
+# agent's config.sh aborts on first run with a missing-assembly error
+# (e.g. Microsoft.Win32.Primitives). The tarball ships this helper.
+"${AGENT_HOME}/bin/installdependencies.sh"
 `
 	args := &incus.InstanceExecArgs{
 		Stdin:  strings.NewReader(script),
@@ -238,7 +259,7 @@ su - "${AGENT_USER}" -c "
 		api.ImagesPost{
 			Source: &api.ImagesPostSource{
 				Name: i.Name,
-				Type: "container",
+				Type: instanceTypeStr(conf.VM),
 			},
 			ImagePut: api.ImagePut{
 				Properties: map[string]string{
@@ -322,7 +343,7 @@ su - "${AGENT_USER}" -c "
 	// Now create the alias for the image
 	ciReq := api.ImageAliasesPost{}
 	ciReq.Name = conf.TargetAlias
-	ciReq.Type = "container"
+	ciReq.Type = instanceTypeStr(conf.VM)
 	ciReq.Target = fingerprint
 
 	return c.CreateImageAlias(ciReq)
@@ -388,4 +409,35 @@ func randomString(n int) (string, error) {
 		b[i] = chars[b[i]%byte(len(chars))]
 	}
 	return string(b), nil
+}
+
+// waitBuilderAgent polls a trivial exec until the VM guest agent responds, up to timeout.
+// Near-duplicate of waitForAgent in pool/pool.go — kept separate to avoid a pool<->provision import cycle.
+func waitBuilderAgent(ctx context.Context, c incus.InstanceServer, name string, timeout, interval time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		op, err := c.ExecInstance(name, api.InstanceExecPost{
+			Command: []string{"true"}, WaitForWS: true,
+		}, &incus.InstanceExecArgs{})
+		if err == nil {
+			attemptCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			werr := op.WaitContext(attemptCtx)
+			cancel()
+			if werr == nil {
+				return nil
+			}
+			lastErr = werr
+		} else {
+			lastErr = err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("builder agent on %q not ready after %s: %w", name, timeout, lastErr)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+	}
 }

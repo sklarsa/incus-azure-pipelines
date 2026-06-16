@@ -49,6 +49,15 @@ func instanceTypeStr(vm bool) string {
 //go:embed run_agent.sh
 var runAgentScript string
 
+// isAlreadyStopped reports whether err is the Incus "instance is already
+// stopped" response. Incus returns this as a 400 Bad Request with that
+// message; there is no exported sentinel in the client package, so we match
+// on the status and message.
+func isAlreadyStopped(err error) bool {
+	return api.StatusErrorCheck(err, http.StatusBadRequest) &&
+		strings.Contains(err.Error(), "already stopped")
+}
+
 func waitCleanupOp(ctx context.Context, op incus.Operation) error {
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), builderCleanupOpTimeout)
 	defer cancel()
@@ -132,10 +141,16 @@ func BaseImage(ctx context.Context, c incus.InstanceServer, conf Config) error {
 			Force:   true,
 			Timeout: -1,
 		}, "")
-		if err == nil {
-			if err := waitCleanupOp(ctx, stopOp); err != nil {
+		// On the success path the instance is already stopped before publish,
+		// so this stop is expected to be a no-op. Incus reports that as a
+		// 400 "instance is already stopped" — treat it as success rather than
+		// logging a spurious error.
+		if err != nil {
+			if !isAlreadyStopped(err) {
 				slog.Error("error stopping builder instance", "instance", req.Name, "err", err)
 			}
+		} else if err := waitCleanupOp(ctx, stopOp); err != nil {
+			slog.Error("error stopping builder instance", "instance", req.Name, "err", err)
 		}
 
 		delOp, err := c.DeleteInstance(req.Name)

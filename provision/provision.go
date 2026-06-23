@@ -379,6 +379,50 @@ su - "${AGENT_USER}" -c "
 		return err
 	}
 
+	joinFinalizer := startFinalizeSpinner(ctx, op)
+
+	if err = op.WaitContext(ctx); err != nil {
+		joinFinalizer()
+		return err
+	}
+	joinFinalizer()
+
+	// Grab the fingerprint
+	fingerprint, ok := op.Get().Metadata["fingerprint"].(string)
+	if !ok {
+		return fmt.Errorf("error getting fingerprint for new image")
+	}
+
+	// Before aliasing the image, delete any existing aliases
+	_, _, err = c.GetImageAlias(conf.TargetAlias)
+	if err != nil {
+		if !api.StatusErrorCheck(err, http.StatusNotFound) {
+			return err
+		}
+	} else {
+		if err = c.DeleteImageAlias(conf.TargetAlias); err != nil {
+			return fmt.Errorf("error deleting the alias from old image: %w", err)
+		}
+	}
+
+	// Now create the alias for the image
+	ciReq := api.ImageAliasesPost{}
+	ciReq.Name = conf.TargetAlias
+	ciReq.Type = instanceTypeStr(conf.VM)
+	ciReq.Target = fingerprint
+
+	return c.CreateImageAlias(ciReq)
+
+}
+
+// startFinalizeSpinner renders the image-publish progress bar and, once the
+// data-transfer phase completes, a "finalizing image" spinner for the
+// server-side finalization that would otherwise look like a hang at 100%.
+//
+// It returns a join function that stops the spinner goroutine and waits for it
+// to exit. Callers must invoke the join exactly once after op.WaitContext
+// returns (on both the error and success paths).
+func startFinalizeSpinner(ctx context.Context, op incus.Operation) func() {
 	p := progressbar.NewOptions64(100,
 		progressbar.OptionSetDescription("publishing progress"),
 		progressbar.OptionSetWriter(os.Stderr),
@@ -387,11 +431,6 @@ su - "${AGENT_USER}" -c "
 			fmt.Fprint(os.Stderr, "\n")
 		}),
 	)
-	defer func() {
-		if err := p.Close(); err != nil {
-			slog.Error("error closing progress bar", "err", err)
-		}
-	}()
 
 	// atDataDone is closed once the data-transfer phase reaches 100%. After
 	// that, the server still spends time finalizing (compressing and storing)
@@ -441,8 +480,16 @@ su - "${AGENT_USER}" -c "
 	go func() {
 		defer close(finalizeDone)
 
+		// Wait for the data-transfer phase to hit 100% before showing the
+		// finalize spinner. finalizeStop must be an arm here too: the progress
+		// handler is best-effort and may never deliver a 100% event (e.g. a
+		// fast or coalesced publish), so without this case the goroutine would
+		// block on atDataDone forever and the close(finalizeStop)/<-finalizeDone
+		// join below would deadlock.
 		select {
 		case <-atDataDone:
+		case <-finalizeStop:
+			return
 		case <-ctx.Done():
 			return
 		}
@@ -476,40 +523,21 @@ su - "${AGENT_USER}" -c "
 		}
 	}()
 
-	if err = op.WaitContext(ctx); err != nil {
+	// The returned join stops the spinner goroutine and waits for it to exit.
+	// The wait is also guarded by ctx.Done() so a Ctrl-C (which cancels ctx) can
+	// always break the main goroutine out of the join, even if the spinner
+	// goroutine were wedged for some unforeseen reason — belt and suspenders on
+	// top of the finalizeStop arms inside the goroutine itself.
+	return func() {
 		close(finalizeStop)
-		<-finalizeDone
-		return err
-	}
-	close(finalizeStop)
-	<-finalizeDone
-
-	// Grab the fingerprint
-	fingerprint, ok := op.Get().Metadata["fingerprint"].(string)
-	if !ok {
-		return fmt.Errorf("error getting fingerprint for new image")
-	}
-
-	// Before aliasing the image, delete any existing aliases
-	_, _, err = c.GetImageAlias(conf.TargetAlias)
-	if err != nil {
-		if !api.StatusErrorCheck(err, http.StatusNotFound) {
-			return err
+		select {
+		case <-finalizeDone:
+		case <-ctx.Done():
 		}
-	} else {
-		if err = c.DeleteImageAlias(conf.TargetAlias); err != nil {
-			return fmt.Errorf("error deleting the alias from old image: %w", err)
+		if err := p.Close(); err != nil {
+			slog.Error("error closing progress bar", "err", err)
 		}
 	}
-
-	// Now create the alias for the image
-	ciReq := api.ImageAliasesPost{}
-	ciReq.Name = conf.TargetAlias
-	ciReq.Type = instanceTypeStr(conf.VM)
-	ciReq.Target = fingerprint
-
-	return c.CreateImageAlias(ciReq)
-
 }
 
 // getAgentDownloadURL fetches the latest Azure Pipelines agent release and returns

@@ -108,6 +108,73 @@ func TestWaitCleanupOpIgnoresParentCancellation(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestStartFinalizeSpinnerJoinDoesNotDeadlock is a regression test for the
+// publish-finalize deadlock: if the publish operation never delivers a 100%
+// progress event (a best-effort callback), the spinner goroutine used to block
+// forever on atDataDone, so the join (close(finalizeStop); <-finalizeDone) hung
+// and provision never returned — leaving the image published but never aliased.
+//
+// The mock Operation here registers a handler but never invokes it, so no 100%
+// event is ever delivered. The join must still return promptly.
+func TestStartFinalizeSpinnerJoinDoesNotDeadlock(t *testing.T) {
+	op := mocks.NewMockOperation(t)
+	// Handler is registered but intentionally never called: simulate a publish
+	// where the 100% progress event is missing/coalesced.
+	op.On("AddHandler", mock.Anything).Return(nil, nil)
+
+	join := startFinalizeSpinner(context.Background(), op)
+
+	done := make(chan struct{})
+	go func() {
+		join()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("startFinalizeSpinner join deadlocked when no 100% progress event was delivered")
+	}
+}
+
+// TestStartFinalizeSpinnerJoinUnblocksOnCancel verifies the belt-and-suspenders
+// guard: even if the spinner goroutine were wedged, a canceled context must let
+// the join return so a Ctrl-C is never swallowed. Here the data-transfer phase
+// has "completed" so the spinner goroutine is running its ticker loop; canceling
+// the context before joining must still unblock the caller.
+func TestStartFinalizeSpinnerJoinUnblocksOnCancel(t *testing.T) {
+	op := mocks.NewMockOperation(t)
+
+	var handler func(api.Operation)
+	op.On("AddHandler", mock.Anything).Return(nil, nil).Run(func(args mock.Arguments) {
+		handler = args.Get(0).(func(api.Operation))
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	join := startFinalizeSpinner(ctx, op)
+
+	// Drive the data-transfer phase to 100% so the spinner goroutine advances
+	// into its ticker loop, then cancel to exercise the join's ctx.Done() arm.
+	require.NotNil(t, handler)
+	handler(api.Operation{Metadata: map[string]any{
+		"progress": map[string]any{"percent": "100"},
+	}})
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		join()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("startFinalizeSpinner join did not unblock on context cancellation")
+	}
+}
+
 func TestIsAlreadyStopped(t *testing.T) {
 	t.Run("matches the incus already-stopped status error", func(t *testing.T) {
 		err := api.StatusErrorf(http.StatusBadRequest, "The instance is already stopped")

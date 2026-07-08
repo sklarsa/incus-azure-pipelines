@@ -70,6 +70,12 @@ pools:
       maxRamInGb: 4
       tmpfsSizeInGb: 12   # ignored for VM pools
       # startupGracePeriod defaults to 5m for VM pools (1m for containers) when unset
+      # mounts: bind-mount host dirs into each agent (e.g. a shared warm Maven .m2 cache)
+      mounts:
+        - name: maven-cache
+          source: /opt/maven-warm-m2   # host path
+          path: /warm-m2               # mount point inside the agent
+          readOnly: true               # share read-only so concurrent agents can't corrupt it
 ```
 
 ### Create a base image

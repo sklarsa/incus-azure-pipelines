@@ -153,6 +153,13 @@
         "startupGracePeriod": {
           "type": "integer",
           "description": "StartupGracePeriod is how long to wait before considering an agent stale"
+        },
+        "mounts": {
+          "items": {
+            "$ref": "#/$defs/PoolMount"
+          },
+          "type": "array",
+          "description": "Mounts are extra host directories bind-mounted into each agent container as\nIncus disk devices. The primary use is sharing a warm, read-only Maven .m2\ncache across the ephemeral agents so builds resolve cached artifacts locally\ninstead of over the network. Mount shared caches read-only so concurrent\nagents cannot corrupt each other's writes."
         }
       },
       "additionalProperties": false,
@@ -160,6 +167,34 @@
       "required": [
         "image"
       ]
+    },
+    "PoolMount": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name is the Incus device name; must be unique within a container."
+        },
+        "source": {
+          "type": "string",
+          "description": "Source is the host path to bind-mount."
+        },
+        "path": {
+          "type": "string",
+          "description": "Path is the mount point inside the container."
+        },
+        "readOnly": {
+          "type": "boolean",
+          "description": "ReadOnly mounts the source read-only. Recommended for shared caches."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "source",
+        "path"
+      ],
+      "description": "Mount is a host directory bind-mounted into each agent container."
     }
   },
   "title": "incus-azure-pipelines configuration",

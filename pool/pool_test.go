@@ -188,6 +188,38 @@ func TestPool_Create(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestPool_Create_Mounts(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+	conf.Incus.Mounts = []Mount{
+		{Name: "maven-cache", Source: "/opt/maven-warm-m2", Path: "/warm-m2", ReadOnly: true},
+	}
+
+	op := mocks.NewMockOperation(t)
+	op.On("WaitContext", mock.Anything).Return(nil)
+
+	m.On("CreateInstance", mock.MatchedBy(func(req api.InstancesPost) bool {
+		dev, ok := req.Devices["maven-cache"]
+		return ok &&
+			dev["type"] == "disk" &&
+			dev["source"] == "/opt/maven-warm-m2" &&
+			dev["path"] == "/warm-m2" &&
+			dev["readonly"] == "true"
+	})).Return(op, nil)
+
+	m.On("CreateInstanceFile", "azp-agent-0", "/home/agent/.token", mock.Anything).Return(nil)
+
+	execOp := mocks.NewMockOperation(t)
+	execOp.On("WaitContext", mock.Anything).Return(nil)
+	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(execOp, nil)
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	err = pool.CreateAgent(context.Background(), 0)
+	require.NoError(t, err)
+}
+
 func TestPool_Create_Error(t *testing.T) {
 	m := mocks.NewMockInstanceServer(t)
 	conf := testConfig()

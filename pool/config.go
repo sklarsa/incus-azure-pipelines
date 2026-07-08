@@ -46,6 +46,24 @@ type IncusConfig struct {
 	StoragePool string `json:"storagePool,omitempty"`
 	// StartupGracePeriod is how long to wait before considering an agent stale
 	StartupGracePeriod time.Duration `json:"startupGracePeriod,omitempty"`
+	// Mounts are extra host directories bind-mounted into each agent container as
+	// Incus disk devices. The primary use is sharing a warm, read-only Maven .m2
+	// cache across the ephemeral agents so builds resolve cached artifacts locally
+	// instead of over the network. Mount shared caches read-only so concurrent
+	// agents cannot corrupt each other's writes.
+	Mounts []Mount `json:"mounts,omitempty" validate:"omitempty,dive"`
+}
+
+// Mount is a host directory bind-mounted into each agent container.
+type Mount struct {
+	// Name is the Incus device name; must be unique within a container.
+	Name string `json:"name" validate:"required"`
+	// Source is the host path to bind-mount.
+	Source string `json:"source" validate:"required"`
+	// Path is the mount point inside the container.
+	Path string `json:"path" validate:"required"`
+	// ReadOnly mounts the source read-only. Recommended for shared caches.
+	ReadOnly bool `json:"readOnly,omitempty"`
 }
 
 type AzureConfig struct {

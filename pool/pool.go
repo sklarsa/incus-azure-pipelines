@@ -150,6 +150,20 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 			req.Config["limits.memory"] = fmt.Sprintf("%dGiB", p.conf.Incus.MaxRamInGb)
 		}
 
+		// Bind-mount any configured host directories (e.g. a shared read-only
+		// Maven .m2 cache) into the agent as Incus disk devices.
+		for _, m := range p.conf.Incus.Mounts {
+			dev := map[string]string{
+				"type":   "disk",
+				"source": m.Source,
+				"path":   m.Path,
+			}
+			if m.ReadOnly {
+				dev["readonly"] = "true"
+			}
+			req.Devices[m.Name] = dev
+		}
+
 		op, err := p.c.CreateInstance(req)
 		if err != nil {
 			return err

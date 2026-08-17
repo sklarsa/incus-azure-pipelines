@@ -34,11 +34,15 @@ func waitOp(ctx context.Context, op incus.Operation, timeout time.Duration) erro
 }
 
 type Pool struct {
-	c        incus.InstanceServer
-	conf     Config
-	agentRe  *regexp.Regexp
-	inFlight *sync.Map
-	logger   *slog.Logger
+	c            incus.InstanceServer
+	conf         Config
+	agentRe      *regexp.Regexp
+	agentPrefix  string
+	inFlight     *sync.Map
+	offlineSince map[int]time.Time
+	azure        AzureAgentClient
+	now          func() time.Time
+	logger       *slog.Logger
 }
 
 func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
@@ -47,9 +51,11 @@ func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
 	}
 
 	p := &Pool{
-		c:        c,
-		conf:     conf,
-		inFlight: &sync.Map{},
+		c:            c,
+		conf:         conf,
+		inFlight:     &sync.Map{},
+		offlineSince: make(map[int]time.Time),
+		now:          time.Now,
 	}
 	// Log the effective project ("default" when unset) so it's clear where
 	// instances are created.
@@ -72,6 +78,21 @@ func NewPool(c incus.InstanceServer, conf Config) (*Pool, error) {
 		} else {
 			p.conf.Incus.StartupGracePeriod = time.Minute
 		}
+	}
+	if p.conf.OfflineGracePeriod == 0 {
+		p.conf.OfflineGracePeriod = 5 * time.Minute
+	}
+
+	p.agentPrefix = p.conf.AgentPrefix
+	if p.agentPrefix == "" {
+		p.agentPrefix, err = os.Hostname()
+		if err != nil {
+			return nil, fmt.Errorf("determine Azure agent name prefix: %w", err)
+		}
+	}
+	p.azure, err = newHTTPAzureAgentClient(p.conf.Azure.Url, p.conf.Azure.PAT, nil)
+	if err != nil {
+		return nil, err
 	}
 
 	err = prometheus.DefaultRegisterer.Register(newAgentUptimeCollector(p))
@@ -175,21 +196,12 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 			return err
 		}
 
-		agentPrefix := p.conf.AgentPrefix
-		if agentPrefix == "" {
-			var err error
-			agentPrefix, err = os.Hostname()
-			if err != nil {
-				return err
-			}
-		}
-
 		execPost := api.InstanceExecPost{
 			Command: []string{
 				"setsid",
 				"--fork",
 				"/home/agent/run_agent.sh",
-				"--agent", fmt.Sprintf("%s-%d", agentPrefix, idx),
+				"--agent", p.AzureAgentName(idx),
 				"--pool", p.conf.Name,
 				"--url", p.conf.Azure.Url,
 			},
@@ -292,22 +304,36 @@ func (p *Pool) Reconcile(agentsToCreate chan<- int) error {
 }
 
 func (p *Pool) Reap(ctx context.Context) error {
-	now := time.Now()
+	now := p.now()
 
 	instances, err := p.ListAgentsFull()
 	if err != nil {
 		return err
 	}
 
-	for _, instance := range instances {
+	var (
+		azureAgents map[string]AzureAgentStatus
+		azureErr    error
+		azureLoaded bool
+	)
+	loadAzureAgents := func() (map[string]AzureAgentStatus, error) {
+		if !azureLoaded {
+			azureLoaded = true
+			azureAgents, azureErr = p.azure.ListAgents(ctx, p.conf.Name)
+		}
+		return azureAgents, azureErr
+	}
 
+	for _, instance := range instances {
 		idx, err := p.agentIndex(instance.Name)
 		if err != nil {
 			continue
 		}
 
-		// Skip if container is not running
+		// Any state where this exact instance cannot yet be judged resets prior
+		// observations for the reused pool index.
 		if instance.State == nil {
+			delete(p.offlineSince, idx)
 			p.logger.Debug("reaper: skipping instance",
 				"reason", "instance state unknown",
 				"idx", idx,
@@ -317,6 +343,7 @@ func (p *Pool) Reap(ctx context.Context) error {
 
 		status := instance.State.Status
 		if status != "Running" {
+			delete(p.offlineSince, idx)
 			p.logger.Debug("reaper: skipping instance",
 				"reason", fmt.Sprintf("container status: %s", status),
 				"idx", idx,
@@ -324,9 +351,9 @@ func (p *Pool) Reap(ctx context.Context) error {
 			continue
 		}
 
-		// Skip if container is too young
 		age := now.Sub(instance.CreatedAt)
 		if age < p.conf.Incus.StartupGracePeriod {
+			delete(p.offlineSince, idx)
 			p.logger.Debug("reaper: skipping instance",
 				"reason", "age < grace period",
 				"age", age,
@@ -335,20 +362,78 @@ func (p *Pool) Reap(ctx context.Context) error {
 			continue
 		}
 
-		// Check if agent process is running
-		running, err := p.isAgentProcessRunning(ctx, idx)
+		wrapperRunning, err := p.isAgentProcessRunning(ctx, idx)
 		if err != nil {
+			delete(p.offlineSince, idx)
 			p.logger.Warn("reaper: health check failed", "idx", idx, "err", err)
 			continue
 		}
 
-		if running {
+		workerRunning, err := p.isAgentWorkerRunning(ctx, idx)
+		if err != nil {
+			delete(p.offlineSince, idx)
+			p.logger.Warn("reaper: worker health check failed", "idx", idx, "err", err)
+			continue
+		}
+		if workerRunning {
+			delete(p.offlineSince, idx)
 			p.logger.Debug("reaper: skipping instance",
-				"reason", "agent process is running",
+				"reason", "Agent.Worker is running",
 				"age", age,
 				"idx", idx,
 			)
 			continue
+		}
+
+		controlProcessRunning := wrapperRunning
+		if !controlProcessRunning {
+			controlProcessRunning, err = p.isAgentListenerRunning(ctx, idx)
+			if err != nil {
+				delete(p.offlineSince, idx)
+				p.logger.Warn("reaper: listener health check failed", "idx", idx, "err", err)
+				continue
+			}
+		}
+
+		reason := "agent control processes are not running"
+		if controlProcessRunning {
+			agents, err := loadAzureAgents()
+			if err != nil {
+				delete(p.offlineSince, idx)
+				p.logger.Warn("reaper: Azure health check failed; failing closed", "idx", idx, "err", err)
+				continue
+			}
+
+			azureStatus, found := agents[p.AzureAgentName(idx)]
+			if found && (azureStatus.Online || azureStatus.Assigned) {
+				delete(p.offlineSince, idx)
+				p.logger.Debug("reaper: skipping instance",
+					"reason", "Azure agent is online or assigned",
+					"age", age,
+					"idx", idx,
+				)
+				continue
+			}
+
+			offlineAt, observed := p.offlineSince[idx]
+			if !observed {
+				p.offlineSince[idx] = now
+				p.logger.Info("reaper: observed offline unassigned agent",
+					"idx", idx,
+					"grace", p.conf.OfflineGracePeriod,
+				)
+				continue
+			}
+			offlineFor := now.Sub(offlineAt)
+			if offlineFor < p.conf.OfflineGracePeriod {
+				p.logger.Debug("reaper: skipping instance",
+					"reason", "offline duration < grace period",
+					"offline_for", offlineFor,
+					"idx", idx,
+				)
+				continue
+			}
+			reason = "Azure agent remained offline and unassigned without Agent.Worker"
 		}
 
 		if _, exists := p.inFlight.LoadOrStore(idx, true); exists {
@@ -359,9 +444,7 @@ func (p *Pool) Reap(ctx context.Context) error {
 			continue
 		}
 
-		// Stale - reap it
-		p.logger.Info("reaper: reaping stale instance", "idx", idx, "age", age)
-
+		p.logger.Info("reaper: reaping stale instance", "idx", idx, "age", age, "reason", reason)
 		err = p.reapInstance(ctx, idx)
 		p.inFlight.Delete(idx)
 
@@ -369,15 +452,27 @@ func (p *Pool) Reap(ctx context.Context) error {
 			p.logger.Error("reaper: failed to reap", "idx", idx, "err", err)
 			agentsReapedErrorMetric.WithLabelValues(p.conf.Name).Inc()
 		} else {
+			delete(p.offlineSince, idx)
 			agentsReapedMetric.WithLabelValues(p.conf.Name).Inc()
 		}
 	}
 
 	return nil
-
 }
 
 func (p *Pool) isAgentProcessRunning(ctx context.Context, idx int) (bool, error) {
+	return p.isProcessRunning(ctx, idx, "run_agent.sh")
+}
+
+func (p *Pool) isAgentWorkerRunning(ctx context.Context, idx int) (bool, error) {
+	return p.isProcessRunning(ctx, idx, "Agent.Worker")
+}
+
+func (p *Pool) isAgentListenerRunning(ctx context.Context, idx int) (bool, error) {
+	return p.isProcessRunning(ctx, idx, "Agent.Listener")
+}
+
+func (p *Pool) isProcessRunning(ctx context.Context, idx int, pattern string) (bool, error) {
 	op, err := p.c.ExecInstance(
 		p.AgentName(idx),
 		api.InstanceExecPost{
@@ -386,7 +481,7 @@ func (p *Pool) isAgentProcessRunning(ctx context.Context, idx int) (bool, error)
 				"-u",
 				provision.AgentUser,
 				"-f",
-				"run_agent.sh",
+				pattern,
 			},
 			WaitForWS:   true,
 			Interactive: false,
@@ -412,6 +507,20 @@ func (p *Pool) isAgentProcessRunning(ctx context.Context, idx int) (bool, error)
 	}
 
 	return int(returnCode) == 0, nil
+}
+
+// ReapAgent force-stops one pool instance. Incus removes the instance because
+// pool agents are ephemeral, and the reconciler then creates a replacement.
+func (p *Pool) ReapAgent(ctx context.Context, idx int) error {
+	if idx < 0 || idx >= p.conf.AgentCount {
+		return fmt.Errorf("invalid agent index %d, pool %q has %d agents", idx, p.Name(), p.conf.AgentCount)
+	}
+	if _, exists := p.inFlight.LoadOrStore(idx, true); exists {
+		return fmt.Errorf("agent index %d in pool %q already has an operation in flight", idx, p.Name())
+	}
+	defer p.inFlight.Delete(idx)
+
+	return p.reapInstance(ctx, idx)
 }
 
 func (p *Pool) reapInstance(ctx context.Context, idx int) error {
@@ -468,6 +577,10 @@ func (p *Pool) agentIndex(name string) (int, error) {
 
 func (p *Pool) AgentName(idx int) string {
 	return fmt.Sprintf("%s-%d", p.conf.Name, idx)
+}
+
+func (p *Pool) AzureAgentName(idx int) string {
+	return fmt.Sprintf("%s-%d", p.agentPrefix, idx)
 }
 
 // waitForAgent polls a trivial exec until the guest agent responds, up to timeout.

@@ -9,6 +9,9 @@ type Config struct {
 	// If not set, defaults to the machine's hostname.
 	// Must be unique per host to avoid agent name collisions.
 	AgentPrefix string `json:"agentPrefix,omitempty" validate:"omitempty,hostname"`
+	// OfflineGracePeriod is how long an unassigned Azure agent must remain offline
+	// with no local Agent.Worker before its instance is reaped. Default: 5m
+	OfflineGracePeriod time.Duration `json:"offlineGracePeriod,omitempty" validate:"min=0" default:"5m" jsonschema:"type=string"`
 	// Azure specific settings
 	Azure AzureConfig `json:"azure" validate:"required"`
 	// Incus specific settings

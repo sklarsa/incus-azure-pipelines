@@ -101,6 +101,24 @@ pools:
 	require.NoError(t, err)
 	assert.Equal(t, 5*time.Second, config.Daemon.ReconcileInterval)
 	assert.Equal(t, 30*time.Second, config.Daemon.ReaperInterval)
+	assert.Equal(t, 5*time.Minute, config.Pools[0].OfflineGracePeriod)
+}
+
+func TestParseConfig_CustomOfflineGracePeriod(t *testing.T) {
+	yaml := `
+pools:
+  - name: my-pool
+    agentCount: 1
+    offlineGracePeriod: 12m
+    azure:
+      pat: "token"
+      url: "https://dev.azure.com/org"
+    incus:
+      image: "img"
+`
+	config, err := parseConfig([]byte(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, 12*time.Minute, config.Pools[0].OfflineGracePeriod)
 }
 
 func TestParseConfig_CustomDaemonIntervals(t *testing.T) {

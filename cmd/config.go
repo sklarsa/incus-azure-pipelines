@@ -30,6 +30,14 @@ func parseConfig(data []byte) (CLIConfig, error) {
 		return config, err
 	}
 
+	// Pools are allocated by YAML unmarshalling after the initial defaults pass,
+	// so apply per-pool defaults once each pool exists.
+	for i := range config.Pools {
+		if err := defaults.Set(&config.Pools[i]); err != nil {
+			return config, fmt.Errorf("error setting defaults for pool %q: %w", config.Pools[i].Name, err)
+		}
+	}
+
 	v := validator.New(validator.WithRequiredStructEnabled())
 
 	return config, v.Struct(config)

@@ -87,6 +87,10 @@
           "type": "string",
           "description": "AgentPrefix overrides the hostname used for Azure agent naming.\nIf not set, defaults to the machine's hostname.\nMust be unique per host to avoid agent name collisions."
         },
+        "offlineGracePeriod": {
+          "type": "string",
+          "description": "OfflineGracePeriod is how long an unassigned Azure agent must remain offline\nwith no local Agent.Worker before its instance is reaped. Default: 5m"
+        },
         "azure": {
           "$ref": "#/$defs/PoolAzureConfig",
           "description": "Azure specific settings"

@@ -58,6 +58,7 @@ metricsPort: 9922
 pools:
   - name: myAgentPool
     agentCount: 8
+    offlineGracePeriod: 5m # offline + unassigned + no Agent.Worker before automatic reap
     azure:
       pat: myVerySecretPatHere
       url: https://dev.azure.com/<my-organization>
@@ -90,6 +91,8 @@ incus-azure-pipelines provision --vm --base ubuntu/24.04 --target my-vm-runner-i
 
 VM pools also default to a longer reaper startup grace period (5 minutes instead of 1 minute for containers), so slow-booting VMs are not reaped before their agent has a chance to register.
 
+After startup, if `run_agent.sh` or an orphaned `Agent.Listener` is still present, the reaper compares the instance with its Azure DevOps agent record. It reaps only after the Azure agent has remained offline and unassigned for `offlineGracePeriod` (default: 5 minutes) and no local `Agent.Worker` process is running. Azure API failures reset the observation and fail closed, so a control-plane outage does not terminate jobs. An instance with no wrapper, listener, or worker process remains immediately eligible as stale after the startup grace period.
+
 ### Run the orchestrator
 
 Finally, start the orchestrator using some daemonizer (most likely systemd, let's be honest) and see your Agents come to life.
@@ -99,3 +102,13 @@ The command to run the orchestrator is
 ```bash
 incus-azure-pipelines run --config $PATH_OF_CONFIG_FILE
 ```
+
+### Manually reap an agent
+
+To force-stop one ephemeral agent instance and let the running daemon replace it:
+
+```bash
+incus-azure-pipelines reap --config $PATH_OF_CONFIG_FILE <pool> <agent-index>
+```
+
+This command is destructive and does not consult Azure job status; verify that the agent is safe to terminate before running it.

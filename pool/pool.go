@@ -213,7 +213,7 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 			execPost.Environment = p.conf.Env
 		}
 
-		op, err = p.c.ExecInstance(
+		_, err = p.c.ExecInstance(
 			req.Name,
 			execPost,
 			&incus.InstanceExecArgs{},
@@ -223,7 +223,19 @@ func (p *Pool) CreateAgent(ctx context.Context, idx int) error {
 			return err
 		}
 
-		return waitOp(ctx, op, defaultOperationTimeout)
+		// The launcher (run_agent.sh) is deliberately fire-and-forget: it
+		// registers the agent, runs `run.sh --once` and only exits after the job
+		// completes and the machine powers off. The exec operation therefore
+		// stays RUNNING for the whole job (VM execs run through the in-guest
+		// incus-agent and are tied to the process tree), so waiting for it to
+		// complete can never succeed within a sane timeout. Treating the exec as
+		// passed only when the operation completes would misreport every
+		// successful creation as "failed to create agent" (operation timed out).
+		// ExecInstance connects the operation websockets, which launches the
+		// command, so a successful submission is a successful agent launch.
+		// Agents that are created but never come online are handled by the
+		// reaper's offline/stale-agent logic.
+		return nil
 
 	}()
 

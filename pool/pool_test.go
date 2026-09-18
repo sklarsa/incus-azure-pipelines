@@ -178,7 +178,6 @@ func TestPool_Create(t *testing.T) {
 	m.On("CreateInstanceFile", "azp-agent-0", "/home/agent/.token", mock.Anything).Return(nil)
 
 	execOp := mocks.NewMockOperation(t)
-	execOp.On("WaitContext", mock.Anything).Return(nil)
 	m.On("ExecInstance", "azp-agent-0", mock.Anything, mock.Anything).Return(execOp, nil)
 
 	pool, err := NewPool(m, conf)
@@ -222,7 +221,6 @@ func TestPool_Create_NoLimitsWhenZero(t *testing.T) {
 	m.On("CreateInstanceFile", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	execOp := mocks.NewMockOperation(t)
-	execOp.On("WaitContext", mock.Anything).Return(nil)
 	m.On("ExecInstance", mock.Anything, mock.Anything, mock.Anything).Return(execOp, nil)
 
 	pool, err := NewPool(m, conf)
@@ -656,7 +654,6 @@ func TestPool_Create_WithAgentPrefix(t *testing.T) {
 	m.On("CreateInstanceFile", "azp-agent-0", "/home/agent/.token", mock.Anything).Return(nil)
 
 	execOp := mocks.NewMockOperation(t)
-	execOp.On("WaitContext", mock.Anything).Return(nil)
 	m.On("ExecInstance", "azp-agent-0", mock.MatchedBy(func(req api.InstanceExecPost) bool {
 		for i, arg := range req.Command {
 			if arg == "--agent" && i+1 < len(req.Command) {
@@ -688,7 +685,6 @@ func TestPool_Create_WithEnv(t *testing.T) {
 	m.On("CreateInstanceFile", "azp-agent-0", "/home/agent/.token", mock.Anything).Return(nil)
 
 	execOp := mocks.NewMockOperation(t)
-	execOp.On("WaitContext", mock.Anything).Return(nil)
 	m.On("ExecInstance", "azp-agent-0", mock.MatchedBy(func(req api.InstanceExecPost) bool {
 		return req.Environment["VSTS_HTTP_TIMEOUT"] == "300" &&
 			req.Environment["VSTS_HTTP_RETRY"] == "3"
@@ -713,7 +709,6 @@ func TestPool_Create_WithoutEnv(t *testing.T) {
 	m.On("CreateInstanceFile", "azp-agent-0", "/home/agent/.token", mock.Anything).Return(nil)
 
 	execOp := mocks.NewMockOperation(t)
-	execOp.On("WaitContext", mock.Anything).Return(nil)
 	m.On("ExecInstance", "azp-agent-0", mock.MatchedBy(func(req api.InstanceExecPost) bool {
 		return len(req.Environment) == 0
 	}), mock.Anything).Return(execOp, nil)
@@ -763,6 +758,57 @@ func TestPool_Create_VM(t *testing.T) {
 
 	err = pool.CreateAgent(context.Background(), 0)
 	require.NoError(t, err)
+}
+
+// TestPool_Create_VM_LauncherExecNotWaitedOn reproduces the VM-mode bug where
+// every agent creation was reported as "failed to create agent: operation
+// timed out after 30s". The agent launcher (run_agent.sh) is a long-running
+// process that only exits after the job completes and the VM powers off, so
+// its exec operation stays RUNNING server-side for the whole job. Waiting for
+// it to complete can never succeed within a sane timeout, so CreateAgent must
+// treat a successfully-submitted exec as a successful launch.
+func TestPool_Create_VM_LauncherExecNotWaitedOn(t *testing.T) {
+	m := mocks.NewMockInstanceServer(t)
+	conf := testConfig()
+	conf.Incus.VM = true
+	conf.Incus.StoragePool = "default"
+	conf.Incus.MaxCores = 4
+	conf.Incus.MaxRamInGb = 8
+	conf.Incus.DiskSizeInGb = 50
+	conf.Incus.TmpfsSizeInGb = 12 // must be ignored for VMs
+
+	op := mocks.NewMockOperation(t)
+	op.On("WaitContext", mock.Anything).Return(nil)
+	m.On("CreateInstance", mock.Anything).Return(op, nil)
+	m.On("CreateInstanceFile", "azp-agent-0", "/home/agent/.token", mock.Anything).Return(nil)
+
+	// waitForAgent probe (exec "true") completes immediately.
+	probeOp := mocks.NewMockOperation(t)
+	probeOp.On("WaitContext", mock.Anything).Return(nil)
+
+	// The launcher exec (run_agent.sh) runs for the whole job lifetime; its VM
+	// operation stays RUNNING until the machine powers off, so a bounded wait
+	// always times out. Model that by returning a launcher operation whose
+	// WaitContext is never called (no expectation is registered for it).
+	launcherOp := mocks.NewMockOperation(t)
+
+	m.On("ExecInstance", "azp-agent-0", mock.MatchedBy(func(req api.InstanceExecPost) bool {
+		return len(req.Command) == 1 && req.Command[0] == "true"
+	}), mock.Anything).Return(probeOp, nil)
+	m.On("ExecInstance", "azp-agent-0", mock.MatchedBy(func(req api.InstanceExecPost) bool {
+		return len(req.Command) > 0 && req.Command[0] != "true"
+	}), mock.Anything).Return(launcherOp, nil)
+
+	pool, err := NewPool(m, conf)
+	require.NoError(t, err)
+
+	// Creation must succeed even though the launcher exec never completes.
+	err = pool.CreateAgent(context.Background(), 0)
+	require.NoError(t, err)
+
+	// CreateAgent must treat the launcher exec as fire-and-forget and never
+	// wait for its (long-running) operation to complete.
+	launcherOp.AssertNotCalled(t, "WaitContext", mock.Anything)
 }
 
 func TestPool_List_VM(t *testing.T) {

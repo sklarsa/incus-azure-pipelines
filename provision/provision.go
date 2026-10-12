@@ -230,11 +230,15 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin do
 # Add agent to docker group
 usermod -aG docker agent
 
+# The outer set -e doesn't reach inside su -c, so fail explicitly: a truncated
+# download otherwise yields an image without config.sh that crash-loops every agent.
 su - "${AGENT_USER}" -c "
+  set -euo pipefail
   cd ${AGENT_HOME}
   curl -fsSL -o agent.tar.gz ${AGENT_URL}
   tar -xzf agent.tar.gz
   rm agent.tar.gz
+  test -x config.sh
 "
 
 # Install the agent's runtime dependencies (libicu, etc.). Without these the
